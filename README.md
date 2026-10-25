@@ -53,29 +53,57 @@ version of this code let a noisy single-season Elo number override the
 market, which would've pushed max-size bets on model error. Elo doesn't
 predict spread/total outcomes, so it's h2h-only.
 
-### Odds cap and Multis
+### Odds cap, Multis, and SGM
 
 `config.DEFAULT_MAX_SINGLE_ODDS` (2.2, Settings-configurable) is a hard
-ceiling on the dashboard's main "Value Bets" views — not a soft discount
-zone. Anything priced higher still gets found and stored (useful for
-Performance history and as multi-leg candidates) but is tucked into a
-collapsed "not shown by default" expander instead of the normal feed.
+ceiling on the dashboard's main "Value Bets"/"Predictions" views — not a
+soft discount zone. Anything priced higher still gets found and stored
+(useful for Performance history and as multi-leg candidates) but is tucked
+into a collapsed "not shown by default" expander instead of the normal feed.
 
-`models/multis.py` combines several of the current +EV singles from
-*different* games into one bet, under two hard rules: every leg must be at
-the **same bookmaker** (a multi is one bet slip at one app — combining the
-best-priced leg from Sportsbet with another from Betfair isn't a bet you
-can actually place), and combined odds are capped at `MAX_COMBINED_ODDS`
-(4.0), with each leg individually capped at `MAX_LEG_ODDS` (2.2, matching
-the single-bet ceiling). An earlier version let three longshots compound
-into ~400-to-1 combined odds at a ~4% hit chance — technically +EV, not a
-sensible recommendation. Cross-game only: combining markets *within* one
-game needs real correlation data or bookmaker-priced SGM odds, neither of
-which this data source has (checked — `sgm` isn't a valid market on The
-Odds API). Every combo reports edge **and** the realistic chance every leg
-lands — don't read one without the other. Because both caps are strict,
-some days turn up very few or zero multis — that's the caps working as
-intended, not a bug to loosen without asking.
+`models/multis.py` has two combo builders, both under the same two hard
+rules: every leg must be at the **same bookmaker** (a multi is one bet slip
+at one app — combining the best-priced leg from Sportsbet with another from
+Betfair isn't a bet you can actually place), and the **combined** price is
+capped at `MAX_COMBINED_ODDS` (2.2, same ceiling as a single), with each
+leg individually capped at `MAX_LEG_ODDS` (2.2). An earlier version let
+three longshots compound into ~400-to-1 combined odds at a ~4% hit chance —
+technically +EV, not a sensible recommendation.
+
+- `suggest_multis` — cross-game, legs from *different* matches. Multiplying
+  independent probabilities together is mathematically correct here.
+- `suggest_sgms` — same-game, legs from *different markets* (Win/Handicap/
+  Line) within one match. Marked `approximate: True` on every result: those
+  legs are correlated (a team winning and the game going under both lean
+  the same way), so the combined edge/hit-chance is a rough estimate, not a
+  verified number like the cross-game multis. Shipped anyway, deliberately,
+  on the basis that an approximate "here's the combo I'd lean towards" is
+  still a useful tip as long as it's labelled as an estimate rather than a
+  verified edge — real bookmaker-priced SGM odds aren't available through
+  this data source (checked — `sgm` isn't a valid market on The Odds API).
+
+Because both caps are strict, some days turn up very few or zero
+multis/SGMs — that's the caps working as intended, not a bug to loosen
+without asking.
+
+### Predictions (`tip_type="prediction"`)
+
+A separate, explicitly lower-confidence tip category: the Elo model's own
+lean on a game, shown even when no cross-bookmaker price discrepancy was
+found. Different claim than a value tip and never mixed into its count,
+sizing, or the min-edge threshold — flat `PREDICTION_UNITS` stake, its own
+`tip_type`, reasoning that says plainly "no confirmed market edge."
+Gated to `PREDICTION_ELIGIBLE_SPORTS` (nba/nbl/nfl/afl) because the Elo
+model only ever splits probability between home/away — for a 3-way sport
+like EPL (draws are ~25% of results) that would overstate both teams' true
+win probability by ignoring the draw entirely, so EPL doesn't get this
+until the model is draw-aware. Also requires `model_prob >= 0.55` and
+`model_prob >= implied_prob` of the price (the model has to actually think
+the price is fair-or-better, not just be split 51/49), and respects the
+same `max_single_odds` cap as everything else. Capped at
+`MAX_PREDICTIONS_PER_SPORT` (4) shown per sport in the dashboard — a model
+can clear the bar on a dozen games in one slate, which isn't "a few bets a
+day" any more.
 
 ### API quota
 
@@ -105,6 +133,15 @@ while still scaling with how confident the edge is.
 `models/kelly.py`'s actual Kelly-criterion math still exists as a tested
 utility if you want to switch back to it, just isn't wired into the default
 pipeline.
+
+**Dates are AU-local, not UTC.** Both The Odds API's `commence_time` and
+ESPN's `date` are UTC; `_local_game_date`/`_local_date` convert to
+`Australia/Sydney` before taking the calendar date. Found this the hard
+way: AEDT is UTC+11, so a game late UTC evening is already "tomorrow" in
+Sydney -- taking the UTC date directly filed some games under yesterday,
+which made them silently vanish from the dashboard's "today onwards"
+window right after local midnight. Same conversion applies to historical
+results, so back-to-back/rest-day detection uses the right calendar day too.
 
 ## "Ball knowledge" tips (NBA, EPL, NBL, AFL)
 

@@ -10,13 +10,27 @@ treat it as a bit fragile (wrap calls, don't assume it's forever stable).
 """
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import requests
 
 BASE = "https://site.api.espn.com/apis/site/v2/sports"
 
+# ESPN's event "date" is UTC. AEDT is UTC+11, so a game late UTC evening is
+# already "tomorrow" locally -- taking the UTC date directly would file a
+# back-to-back check (and Elo's chronological ordering) under the wrong
+# calendar day. Same issue, same fix, as tips/generate_tips._local_game_date.
+AU_TZ = ZoneInfo("Australia/Sydney")
+
 
 class EspnError(RuntimeError):
     pass
+
+
+def _local_date(iso_timestamp: str) -> str:
+    dt_utc = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
+    return dt_utc.astimezone(AU_TZ).date().isoformat()
 
 
 def _get(url: str, params: dict | None = None) -> dict:
@@ -85,7 +99,7 @@ def get_finished_games_for_training(
                     continue
                 seen_ids.add(event["id"])
                 games.append({
-                    "date": event["date"][:10],
+                    "date": _local_date(event["date"]),
                     "season": event.get("season", {}).get("year"),
                     "home_team": home["team"]["displayName"],
                     "away_team": away["team"]["displayName"],

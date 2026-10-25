@@ -6,10 +6,12 @@ dashboard. Markets (h2h/spreads/totals) and whether a sport has a results
 history (for Elo + ball-knowledge notes) are driven by config.SPORT_CONFIG --
 see that file to add a new sport.
 """
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from config import (
     AU_BOOKMAKERS,
+    DEFAULT_MAX_SINGLE_ODDS,
     DEFAULT_MAX_UNITS_PER_BET,
     DEFAULT_MIN_EDGE_PCT,
     DEFAULT_TIER_UNITS_LEAN,
@@ -38,6 +40,7 @@ def _load_staking_settings() -> dict:
     return {
         "max_units": _get_float_setting("max_units_per_bet", DEFAULT_MAX_UNITS_PER_BET),
         "min_edge_pct": _get_float_setting("min_edge_pct", DEFAULT_MIN_EDGE_PCT),
+        "max_single_odds": _get_float_setting("max_single_odds", DEFAULT_MAX_SINGLE_ODDS),
         "tier_units": {
             "Strong": _get_float_setting("tier_units_strong", DEFAULT_TIER_UNITS_STRONG),
             "Moderate": _get_float_setting("tier_units_moderate", DEFAULT_TIER_UNITS_MODERATE),
@@ -49,6 +52,19 @@ def _load_staking_settings() -> dict:
 def _tier_units(tier: str, settings: dict) -> float:
     base = settings["tier_units"].get(tier, settings["tier_units"]["Lean"])
     return round(min(base, settings["max_units"]), 2)
+
+
+# Model Elo is draw-aware for exactly zero of the sports configured so far --
+# it only ever splits probability between home/away. For a 3-way sport
+# (EPL has draws, ~25% of results) that overstates both teams' true win
+# probability by ignoring the draw entirely. Fine as a soft sanity-check
+# comparison (how it's used elsewhere), not fine as the basis for a
+# standalone "the model likes this" recommendation -- so Prediction tips
+# are restricted to sports where a binary win/loss split is a reasonable
+# model of the market in the first place.
+PREDICTION_ELIGIBLE_SPORTS = {"nba", "nbl", "nfl", "afl"}
+PREDICTION_MIN_MODEL_PROB = 0.55
+PREDICTION_UNITS = 1.0
 
 
 def _espn_season_years(sport: str) -> list[int]:
@@ -101,6 +117,22 @@ def _effective_min_edge(decimal_odds: float, market: str, base_threshold: float)
     return base_threshold
 
 
+AU_TZ = ZoneInfo("Australia/Sydney")  # handles AEST/AEDT automatically
+
+
+def _local_game_date(commence_time_iso: str) -> str:
+    """
+    The Odds API's commence_time is UTC. AEDT is UTC+11, so a game at, say,
+    9am UTC is already 8pm *tonight* in Sydney -- taking the UTC date
+    directly would label it with what's still "today" in UTC but could be
+    "tomorrow" locally (or vice versa near local midnight, when UTC is
+    still on the previous day). Convert to AU local time before taking the
+    date, so "today" in the dashboard means what an AU user means by it.
+    """
+    dt_utc = datetime.fromisoformat(commence_time_iso.replace("Z", "+00:00"))
+    return dt_utc.astimezone(AU_TZ).date().isoformat()
+
+
 def _format_selection(outcome_name: str, point, market_key: str) -> str:
     if point is None:
         return outcome_name
@@ -132,12 +164,12 @@ def run(sport: str = "nba", log=print) -> dict:
     events = odds_api.fetch_odds(cfg["odds_key"], markets=",".join(cfg["markets"]))
     log(f"[{sport}] {len(events)} upcoming games with odds.")
 
-    value_tips, knowledge_notes_logged = 0, 0
+    value_tips, prediction_tips, knowledge_notes_logged = 0, 0, 0
 
     for event in events:
         home_odds_name = event["home_team"]
         away_odds_name = event["away_team"]
-        game_date = event["commence_time"][:10]
+        game_date = _local_game_date(event["commence_time"])
         matchup = f"{away_odds_name} @ {home_odds_name}"
 
         model_probs = {}
@@ -153,6 +185,7 @@ def run(sport: str = "nba", log=print) -> dict:
             notes = situational.generate_notes(home_team, away_team, game_date_obj, team_logs)
 
         game_had_value = False
+        h2h_best_prices, h2h_value_outcomes = {}, set()
         for market in cfg["markets"]:
             # Point consensus and the "AU consensus" fair prob both stay
             # AU-only -- Pinnacle quoting a different point, or being blended
@@ -186,6 +219,8 @@ def run(sport: str = "nba", log=print) -> dict:
             best_prices = odds_api.best_price_per_outcome(
                 event, market, outcome_points, allowed_bookmakers=USER_BOOKMAKERS
             )
+            if market == "h2h":
+                h2h_best_prices = best_prices
 
             for outcome_name, price_info in best_prices.items():
                 decimal_odds = price_info["price"]
@@ -249,6 +284,52 @@ def run(sport: str = "nba", log=print) -> dict:
                     })
                     value_tips += 1
                     game_had_value = True
+                    if market == "h2h":
+                        h2h_value_outcomes.add(outcome_name)
+
+        # Prediction tips: no confirmed market edge, just "the model likes
+        # this side" -- clearly a different, lower-confidence claim than a
+        # value tip, so it's a separate tip_type with its own flat (smaller)
+        # stake, never mixed into the value-tip count or sizing.
+        if sport in PREDICTION_ELIGIBLE_SPORTS and model_probs:
+            for outcome_name, model_prob in model_probs.items():
+                if model_prob < PREDICTION_MIN_MODEL_PROB or outcome_name in h2h_value_outcomes:
+                    continue
+                price_info = h2h_best_prices.get(outcome_name)
+                if not price_info:
+                    continue
+                decimal_odds = price_info["price"]
+                if decimal_odds > settings["max_single_odds"]:
+                    continue
+                implied_prob = 1.0 / decimal_odds
+                if model_prob < implied_prob:
+                    continue  # model doesn't even think this price is fair, let alone a lean
+                reasoning_parts = [
+                    f"[Model prediction — no confirmed market edge] Elo gives {outcome_name} a "
+                    f"{model_prob:.1%} chance, above the {implied_prob:.1%} the price implies, "
+                    f"at {price_info['bookmaker']}. No cross-bookmaker price discrepancy was "
+                    f"found here — this is a model lean, not detected market value, and Elo is "
+                    f"noisiest early in a season.",
+                ]
+                if outcome_name in (home_odds_name, away_odds_name) and notes:
+                    reasoning_parts.extend(notes)
+                db.insert_tip({
+                    "game_date": game_date,
+                    "sport": sport,
+                    "matchup": matchup,
+                    "market": "h2h",
+                    "selection": outcome_name,
+                    "bookmaker": price_info["bookmaker"],
+                    "odds_decimal": decimal_odds,
+                    "model_prob": model_prob,
+                    "market_fair_prob": None,
+                    "edge_pct": None,
+                    "suggested_units": PREDICTION_UNITS,
+                    "tip_type": "prediction",
+                    "reasoning": " ".join(reasoning_parts),
+                })
+                prediction_tips += 1
+                game_had_value = True  # a prediction still counts as "something to show" for this game
 
         if notes and not game_had_value:
             db.insert_tip({
@@ -268,8 +349,11 @@ def run(sport: str = "nba", log=print) -> dict:
             })
             knowledge_notes_logged += 1
 
-    log(f"[{sport}] done: {value_tips} value tips, {knowledge_notes_logged} standalone knowledge notes.")
-    return {"value_tips": value_tips, "knowledge_notes": knowledge_notes_logged}
+    log(
+        f"[{sport}] done: {value_tips} value tips, {prediction_tips} prediction tips, "
+        f"{knowledge_notes_logged} standalone knowledge notes."
+    )
+    return {"value_tips": value_tips, "prediction_tips": prediction_tips, "knowledge_notes": knowledge_notes_logged}
 
 
 def ensure_fresh(sport: str, log=print) -> dict:

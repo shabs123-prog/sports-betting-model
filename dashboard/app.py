@@ -117,6 +117,46 @@ def render_knowledge_cards(tips: list, show_sport_header: bool = False):
                 st.write(t["reasoning"])
 
 
+MAX_PREDICTIONS_PER_SPORT = 4  # "3-4 bets a day" -- don't flood with every model lean
+
+
+def render_prediction_cards(tips: list, show_sport_header: bool = False):
+    """
+    Model leans -- no confirmed market edge, so unlike render_value_cards
+    there's no risk/edge column (market_fair_prob and edge_pct are both None
+    for these). Shows the model's own confidence instead. Capped per sport
+    at the model's most confident picks -- a model can clear the bar on a
+    dozen games in one slate, which isn't "3-4 bets a day" any more.
+    """
+    if not tips:
+        st.caption("No model predictions for this view right now.")
+        return
+    df = pd.DataFrame(tips)
+    df["market_label"] = df["market"].map(lambda m: MARKET_LABEL.get(m, m))
+    sports = sorted(df["sport"].unique()) if show_sport_header else [None]
+    for sport in sports:
+        sport_df = df if sport is None else df[df["sport"] == sport]
+        if sport_df.empty:
+            continue
+        shown = sport_df.sort_values("model_prob", ascending=False)
+        hidden = max(0, len(shown) - MAX_PREDICTIONS_PER_SPORT)
+        shown = shown.head(MAX_PREDICTIONS_PER_SPORT)
+        if sport is not None:
+            st.markdown(f"#### {sport.upper()}")
+        for _, t in shown.iterrows():
+            with st.container(border=True):
+                st.markdown(f"**{t['matchup']}** · {t['game_date']}")
+                st.markdown(
+                    f"**{t['market_label']}** · {t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}"
+                )
+                c1, c2 = st.columns([1, 2])
+                c1.metric("Units", f"{t['suggested_units']:g}")
+                c2.markdown(f"Model confidence: **{t['model_prob']:.1%}**")
+                st.caption(t["reasoning"])
+        if hidden > 0:
+            st.caption(f"+ {hidden} more prediction(s) not shown, to keep this to a handful a day.")
+
+
 def render_sport_tab(sport: str):
     cfg = SPORT_CONFIG[sport]
     _, refresh_col = st.columns([4, 1])
@@ -125,7 +165,10 @@ def render_sport_tab(sport: str):
             with st.spinner(f"Refreshing {sport.upper()}..."):
                 result = run_pipeline(sport=sport, log=lambda *_a, **_k: None)
                 db.set_setting(f"last_run_date_{sport}", date.today().isoformat())
-            st.success(f"{result['value_tips']} value tips, {result['knowledge_notes']} knowledge notes.")
+            st.success(
+                f"{result['value_tips']} value tips, {result.get('prediction_tips', 0)} predictions, "
+                f"{result['knowledge_notes']} knowledge notes."
+            )
             st.rerun()
 
     if not cfg["has_history"]:
@@ -141,6 +184,12 @@ def render_sport_tab(sport: str):
     render_value_cards(value_tips)
 
     if cfg["has_history"]:
+        st.divider()
+        st.subheader("Predictions")
+        st.caption("Model leans with no confirmed market edge — a lower-confidence claim than a Value Bet, not a detected price discrepancy.")
+        prediction_tips = db.get_tips_in_range(today_str, end_str, tip_type="prediction", sport=sport)
+        render_prediction_cards(prediction_tips)
+
         st.divider()
         st.subheader("Ball Knowledge")
         knowledge_tips = db.get_tips_in_range(today_str, end_str, tip_type="knowledge", sport=sport)
@@ -207,23 +256,12 @@ with tab_week:
         st.caption(f"All at {cap:g} odds or under, prioritising Line/Handicap — a short, curated list.")
         render_value_cards(recommended.to_dict("records"), show_sport_header=True, show_excluded=False)
 
-        st.divider()
-        st.subheader("Multis (cross-game)")
-        st.caption(
-            "Combines several of this week's +EV singles from *different* games, all at the "
-            "**same bookmaker** (so it's one bet slip you can actually place), into a multi. "
-            "Combined odds capped at 4x, usually closer to 2x. Never combines two markets in "
-            "the same match — that needs real correlation data this tool doesn't have (same "
-            "caveat as Horses). Higher variance than a single: a multi only pays if every leg "
-            "wins, so the 'chance all legs hit' number matters as much as the edge."
-        )
-        combos = multis.suggest_multis(df.to_dict("records"))
-
         def _render_multi_combo(combo):
             with st.container(border=True):
+                tag = " · approximate (correlated legs)" if combo.get("approximate") else ""
                 st.markdown(
-                    f"**{combo['size']}-leg multi · {combo['bookmaker']} · "
-                    f"combined odds {combo['combined_odds']}**"
+                    f"**{combo['size']}-leg · {combo['bookmaker']} · "
+                    f"combined odds {combo['combined_odds']}{tag}**"
                 )
                 for leg in combo["legs"]:
                     st.markdown(
@@ -235,19 +273,39 @@ with tab_week:
                 c1.metric("Combined edge", f"{combo['combined_edge_pct']:+.1%}")
                 c2.metric("Chance all legs hit", f"{combo['implied_hit_pct']:.1%}")
 
-        if not combos:
-            st.caption("Not enough same-bookmaker picks across different games this week to build one.")
-        else:
+        def _render_combo_group(combos):
+            if not combos:
+                st.caption("Not enough eligible picks this week to build one.")
+                return
             two_leg = [c for c in combos if c["size"] == 2][:4]
             three_leg = [c for c in combos if c["size"] == 3][:3]
-            if two_leg:
-                st.markdown("**2-leg — the more sensible starting point**")
-                for combo in two_leg:
-                    _render_multi_combo(combo)
+            for combo in two_leg:
+                _render_multi_combo(combo)
             if three_leg:
                 with st.expander(f"3-leg — noticeably higher variance ({len(three_leg)})"):
                     for combo in three_leg:
                         _render_multi_combo(combo)
+
+        st.divider()
+        st.subheader("Multis (cross-game)")
+        st.caption(
+            "Combines several of this week's +EV singles from *different* games, all at the "
+            "**same bookmaker** (so it's one bet slip you can actually place). Combined odds "
+            "capped at 2.2, same ceiling as a single. Higher variance than a single: a multi "
+            "only pays if every leg wins, so the 'chance all legs hit' number matters as much "
+            "as the edge."
+        )
+        _render_combo_group(multis.suggest_multis(df.to_dict("records")))
+
+        st.divider()
+        st.subheader("Same-Game Multis (SGM)")
+        st.caption(
+            "Combines different markets (Win/Handicap/Line) within the *same* game, same "
+            "bookmaker. Marked **approximate** — these legs are correlated (a team winning and "
+            "the game going under both lean the same way), so the combined edge/hit-chance "
+            "shown is a rough estimate, not a verified number like the cross-game multis above."
+        )
+        _render_combo_group(multis.suggest_sgms(df.to_dict("records")))
 
         rest = df.drop(recommended.index)
         if not rest.empty:
