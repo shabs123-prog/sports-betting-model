@@ -250,10 +250,18 @@ your phone.
 
 1. **This Week** — best picks across every sport for the next 7 days, not
    just today/tonight, all within the odds cap (2.2 default). A 🔥 Big
-   Value Alert when something clears a high bar (3%+ edge), a curated
-   5-pick Recommended list prioritising Line/Handicap, same-bookmaker
-   cross-game Multis (2-leg front and centre, 3-leg tucked in an expander),
-   then everything else (including above-cap picks) collapsed below.
+   Value Alert when something clears a high bar (3%+ edge), then 🔒
+   **Must-Bet** -- a short list (up to 4) of only the picks that clear a
+   Moderate-or-better edge (1.5%+) *and* aren't a risky longshot
+   (Not Risky/Neutral win chance) -- the ones to place if you only do a
+   handful of bets this week, not just the top-N by edge alone. Below
+   that, a broader 5-pick Recommended list prioritising Line/Handicap
+   (excludes anything already in Must-Bet), same-bookmaker cross-game
+   Multis (2-leg front and centre, 3-leg tucked in an expander), then
+   everything else (including above-cap picks) collapsed below. Some
+   weeks Must-Bet is empty -- that's a real reflection of the market, not
+   a bug: it only shows picks that are both safe and worth the edge, and
+   some weeks the only live edges are longshots sitting in "Everything else."
 2. **One tab per sport** (NBA, EPL, NBL, NFL, NRL, AFL, BBL) — that sport's
    Value Bets (pick, bookmaker, price, edge, units, risk) and Ball Knowledge
    notes together, looking ~2 weeks ahead, with a manual Refresh button.

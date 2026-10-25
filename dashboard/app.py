@@ -240,6 +240,8 @@ tab_week, *sport_tabs, tab_horses, tab_bonus, tab_tracker, tab_perf, tab_setting
 # ---------------------------------------------------------------- This Week
 RECOMMENDED_COUNT = 5  # roughly what a "3-4 bets a week" cadence looks like with some to pick from
 BIG_VALUE_EDGE_BAR = 0.03  # Strong-tier edge -- only flag as a special alert, not every week
+MUST_BET_MIN_EDGE = 0.015  # Moderate tier or better
+MUST_BET_COUNT = 4  # "3-4 bets a week" -- the short list is meant to BE that cadence, not a sample of it
 
 with tab_week:
     st.caption(
@@ -307,7 +309,30 @@ with tab_week:
                 f"well above the usual bar."
             )
 
-        recommended = within_cap.sort_values("priority", ascending=False).head(RECOMMENDED_COUNT)
+        # Must-Bet: the short, high-conviction subset of this week's in-range
+        # picks -- Moderate-tier-or-better edge AND Not Risky/Neutral win
+        # probability. A "Strong" edge on a 15%-chance longshot is still a
+        # longshot; this bar excludes those even though they'd clear
+        # Recommended below, so what lands here is specifically what you'd
+        # want to place even if you only do a handful of bets this week.
+        within_cap["risk"] = within_cap["market_fair_prob"].map(risk_label)
+        must_bet = within_cap[
+            (within_cap["edge_pct"] >= MUST_BET_MIN_EDGE) & (within_cap["risk"] != "Risky")
+        ].sort_values("priority", ascending=False).head(MUST_BET_COUNT)
+
+        st.subheader(f"🔒 Must-bet this week ({len(must_bet)})")
+        st.caption(
+            f"Moderate-or-better edge, Not Risky/Neutral win chance, within {lo:g}-{hi:g} odds — "
+            "if you only place a few bets this week, place these."
+        )
+        if must_bet.empty:
+            st.info("Nothing clears the Must-Bet bar this week — see Recommended below for the next best picks.")
+        else:
+            render_value_cards(must_bet.to_dict("records"), show_sport_header=True, show_excluded=False)
+
+        st.divider()
+        remaining = within_cap.drop(must_bet.index)
+        recommended = remaining.sort_values("priority", ascending=False).head(RECOMMENDED_COUNT)
         st.subheader(f"Recommended bets this week ({len(recommended)})")
         st.caption(f"All within {lo:g}-{hi:g} odds, prioritising Line/Handicap — a short, curated list.")
         render_value_cards(recommended.to_dict("records"), show_sport_header=True, show_excluded=False)
@@ -364,7 +389,7 @@ with tab_week:
         )
         _render_combo_group(multis.suggest_sgms(df.to_dict("records")))
 
-        rest = df.drop(recommended.index)
+        rest = df.drop(must_bet.index).drop(recommended.index)
         if not rest.empty:
             with st.expander(f"Everything else this week ({len(rest)})"):
                 render_value_cards(rest.to_dict("records"), show_sport_header=True)
