@@ -3,11 +3,11 @@ name: Daily tips refresh
 # Runs the pipeline before you'd realistically check your phone, and commits
 # the refreshed tips.db back to the repo. Streamlit Community Cloud
 # auto-redeploys on every push to main, so by the time you open the app the
-# data's already there -- no 2-minute first-load wait on your end.
+# data's already there -- no first-load wait on your end.
 #
-# Needs two repo secrets set first: Settings -> Secrets and variables ->
-# Actions -> New repository secret: ODDS_API_KEY, BALLDONTLIE_API_KEY
-# (same values as your local .env).
+# Needs one repo secret set first: Settings -> Secrets and variables ->
+# Actions -> New repository secret: ODDS_API_KEY (same value as your local
+# .env). Results-history data comes from ESPN's public API, no key needed.
 
 on:
   schedule:
@@ -30,13 +30,11 @@ jobs:
         run: python -m scripts.run_daily nba
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
 
       - name: Refresh EPL
         run: python -m scripts.run_daily epl
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
 
       - name: Commit refreshed tips.db
         run: |

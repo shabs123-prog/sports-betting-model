@@ -38,9 +38,13 @@ p = elo.win_probability(ratings["Lakers"], ratings["Warriors"])
 print(f"Lakers win prob vs Warriors: {p:.1%}")
 
 print("\n== team_names ==")
-idx = build_nickname_index(["Los Angeles Lakers", "LA Clippers", "Boston Celtics"])
-assert resolve("Los Angeles Clippers", idx) == "LA Clippers"
-print("nickname resolution OK")
+canonical = ["Los Angeles Lakers", "LA Clippers", "Boston Celtics", "Leeds United", "Manchester United"]
+idx = build_nickname_index(canonical)
+assert resolve("Los Angeles Clippers", canonical, idx) == "LA Clippers", "nickname fallback should catch LA Clippers"
+assert resolve("Boston Celtics", canonical, idx) == "Boston Celtics", "exact match should short-circuit"
+assert resolve("Leeds United", canonical, idx) == "Leeds United", "exact match must win even though 'United' nickname is ambiguous"
+assert "United" not in idx, "ambiguous nickname (2 teams) should be dropped from the index"
+print("team name resolution OK (exact match + ambiguous-nickname collision avoided)")
 
 print("\n== situational ==")
 finished = [

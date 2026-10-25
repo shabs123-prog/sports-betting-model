@@ -22,7 +22,6 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "tips.db"
 
 ODDS_API_KEY = _get_secret("ODDS_API_KEY", "")
-BALLDONTLIE_API_KEY = _get_secret("BALLDONTLIE_API_KEY", "")
 
 DEFAULT_BANKROLL_AMOUNT = float(_get_secret("BANKROLL_AMOUNT", "1000"))
 DEFAULT_UNIT_SIZE_PCT = float(_get_secret("UNIT_SIZE_PCT", "0.01"))
@@ -37,7 +36,6 @@ DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.005"))
 # or recommend through this tool, full stop.
 ODDS_API_REGION = "au"
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
-BALLDONTLIE_BASE = "https://api.balldontlie.io/v1"
 
 # Bookmakers you actually hold accounts with. "Best price" recommendations
 # are restricted to this list so every tip is one you can actually place --
@@ -47,10 +45,12 @@ BALLDONTLIE_BASE = "https://api.balldontlie.io/v1"
 # the API's naming ever changes.
 USER_BOOKMAKERS = {"SportsBet", "PointsBet (AU)", "TAB", "Ladbrokes", "Betfair"}
 
-# "has_history": True means we have a results data source (currently just
-# balldontlie, NBA-only) to train the Elo model and generate ball-knowledge
-# notes. Without it, a sport still gets devig value tips -- just no Elo
-# context and no situational notes.
+# "has_history": True means we have a results data source to train the Elo
+# model and generate ball-knowledge notes (ESPN's public site API -- see
+# data/espn.py -- no key needed, just an espn_sport/espn_league pair below).
+# Without it, a sport still gets devig value tips -- just no Elo context and
+# no situational notes. NRL isn't on ESPN's public API (checked -- 404s);
+# BBL/cricket uses a different ESPN API shape not wired up yet.
 # "auto_refresh": True means the dashboard refreshes this sport automatically
 # (once per day) when you open Today's Tips -- no manual button press needed.
 # Off for sports confirmed off-season right now so the daily auto-refresh
@@ -60,22 +60,28 @@ SPORT_CONFIG = {
     "nba": {
         "odds_key": "basketball_nba",
         "has_history": True,
+        "espn_sport": "basketball",
+        "espn_league": "nba",
         "markets": ["h2h", "spreads", "totals"],
         "auto_refresh": True,
     },
     "epl": {
         "odds_key": "soccer_epl",
-        "has_history": False,
+        "has_history": True,
+        "espn_sport": "soccer",
+        "espn_league": "eng.1",
         "markets": ["h2h", "spreads", "totals"],
         "auto_refresh": True,
     },
     "nbl": {
         "odds_key": "basketball_nbl",
-        "has_history": False,
+        "has_history": True,
+        "espn_sport": "basketball",
+        "espn_league": "nbl",
         "markets": ["h2h", "spreads", "totals"],
         "auto_refresh": False,
     },
-    # NRL/AFL are off-season for part of the year -- that's not a bug, the
+    # NRL is off-season for part of the year -- that's not a bug, the
     # pipeline just returns 0 events until the season starts. Flip
     # auto_refresh to True (or just run manually) once it's close.
     "nrl": {
@@ -86,7 +92,9 @@ SPORT_CONFIG = {
     },
     "afl": {
         "odds_key": "aussierules_afl",
-        "has_history": False,
+        "has_history": True,
+        "espn_sport": "australian-football",
+        "espn_league": "afl",
         "markets": ["h2h", "spreads", "totals"],
         "auto_refresh": False,
     },

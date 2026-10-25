@@ -35,7 +35,6 @@ it shows you, usually a browser sign-in.)
 
 ```toml
 ODDS_API_KEY = "<your key from .env>"
-BALLDONTLIE_API_KEY = "<your key from .env>"
 BANKROLL_AMOUNT = "1000"
 UNIT_SIZE_PCT = "0.01"
 KELLY_FRACTION = "0.3"
@@ -55,14 +54,15 @@ your phone and "Add to Home Screen" for an app-like icon.
 ## 3. Turn on the daily auto-refresh (so tips are just *there*, instantly)
 
 Without this, the app refreshes NBA/EPL itself the first time you open it
-each day — which can take 1-2+ minutes (NBA's results-history pull is
-rate-limited by balldontlie's free tier). `.github/workflows/daily-refresh.yml`
-runs that refresh on a schedule instead, before you'd realistically check
-your phone, so the app is instant when you open it.
+each day — now around 30-60 seconds (ESPN's public API, no rate limiting
+hit so far, much faster than the old balldontlie-based history source).
+`.github/workflows/daily-refresh.yml` runs that refresh on a schedule
+instead, before you'd realistically check your phone, so the app is instant
+when you open it.
 
 1. On GitHub: your repo → **Settings → Secrets and variables → Actions →
-   New repository secret**. Add `ODDS_API_KEY` and `BALLDONTLIE_API_KEY`
-   (same values as your local `.env`).
+   New repository secret**. Add `ODDS_API_KEY` (same value as your local
+   `.env` — this is the only key needed now).
 2. That's it — it runs daily at 19:00 UTC (~6am AEDT, adjust the cron line
    in the workflow file for your timezone/DST). You can also trigger it
    manually any time from the repo's **Actions** tab → "Daily tips refresh"

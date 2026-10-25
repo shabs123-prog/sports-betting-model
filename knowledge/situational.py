@@ -5,9 +5,10 @@ factor in by hand (rest, streaks, situational spots). They get attached to
 value tips as supporting reasoning, and also surface on their own as a
 daily "things to know" feed even when there's no priced edge.
 
-v1 only uses what's derivable from final scores + schedule (balldontlie free
-tier). Injury news is deliberately out of scope here -- plug a news/injury
-feed into `generate_notes` later if you want that signal too.
+v1 only uses what's derivable from final scores + schedule (ESPN's public
+site API -- see data/espn.py). Injury news is deliberately out of scope
+here -- plug a news/injury feed into `generate_notes` later if you want
+that signal too.
 """
 
 from __future__ import annotations

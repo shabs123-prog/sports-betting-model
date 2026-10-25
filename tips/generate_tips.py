@@ -17,7 +17,7 @@ from config import (
     SPORT_CONFIG,
     USER_BOOKMAKERS,
 )
-from data import balldontlie, odds_api
+from data import espn, odds_api
 from db import database as db
 from knowledge import situational
 from models import edge, elo, kelly
@@ -40,22 +40,30 @@ def _load_staking_settings() -> dict:
     }
 
 
-def _finished_games_for_elo(seasons_back: int = 1) -> list:
-    raw = balldontlie.get_finished_games_for_training(seasons_back=seasons_back)
-    games = [
-        {
-            "date": g["date"],
-            "season": g["season"],
-            "home_team": g["home_team"]["full_name"],
-            "away_team": g["visitor_team"]["full_name"],
-            "home_score": g["home_team_score"],
-            "away_score": g["visitor_team_score"],
-        }
-        for g in raw
-        if g["home_team_score"] and g["visitor_team_score"]
-    ]
-    games.sort(key=lambda g: g["date"])
-    return games
+def _espn_season_years(sport: str) -> list[int]:
+    """
+    ESPN's "season" param convention differs per league -- empirically
+    checked (not guessed) for each of these:
+      - nba/nbl: ending-year of a season that spans Oct->Apr (2025-26 = 2026)
+      - epl: starting-year of a season that spans Aug->May (2026-27 = 2026)
+      - afl: single calendar year, season spans Feb->Sep
+    Returns [prior_season_year, current_season_year].
+    """
+    today = date.today()
+    if sport in ("nba", "nbl"):
+        current = today.year + 1 if today.month >= 10 else today.year
+    elif sport == "epl":
+        current = today.year if today.month >= 8 else today.year - 1
+    elif sport == "afl":
+        current = today.year if today.month >= 2 else today.year - 1
+    else:
+        raise ValueError(f"No ESPN season convention defined for {sport!r}")
+    return [current - 1, current]
+
+
+def _finished_games_for_elo(sport: str, cfg: dict) -> list:
+    season_years = _espn_season_years(sport)
+    return espn.get_finished_games_for_training(cfg["espn_sport"], cfg["espn_league"], season_years)
 
 
 def _format_selection(outcome_name: str, point, market_key: str) -> str:
@@ -71,14 +79,15 @@ def run(sport: str = "nba", log=print) -> dict:
     settings = _load_staking_settings()
     cfg = SPORT_CONFIG[sport]
 
-    ratings, team_logs, nickname_index = {}, {}, {}
+    ratings, team_logs, nickname_index, canonical_names = {}, {}, {}, []
     if cfg["has_history"]:
-        log(f"[{sport}] pulling finished games to train Elo ratings...")
-        finished_games = _finished_games_for_elo()
+        log(f"[{sport}] pulling finished games (ESPN) to train Elo ratings...")
+        finished_games = _finished_games_for_elo(sport, cfg)
         ratings = elo.train_from_games(finished_games)
         db.save_elo_ratings(sport, ratings)
         team_logs = situational.build_team_game_log(finished_games)
-        nickname_index = build_nickname_index(list(ratings.keys()))
+        canonical_names = list(ratings.keys())
+        nickname_index = build_nickname_index(canonical_names)
         log(f"[{sport}] trained Elo for {len(ratings)} teams from {len(finished_games)} games.")
     else:
         log(f"[{sport}] no results history wired up yet -- devig value tips only, "
@@ -99,8 +108,8 @@ def run(sport: str = "nba", log=print) -> dict:
         model_probs = {}
         notes = []
         if cfg["has_history"]:
-            home_team = resolve(home_odds_name, nickname_index) or home_odds_name
-            away_team = resolve(away_odds_name, nickname_index) or away_odds_name
+            home_team = resolve(home_odds_name, canonical_names, nickname_index) or home_odds_name
+            away_team = resolve(away_odds_name, canonical_names, nickname_index) or away_odds_name
             home_elo = ratings.get(home_team, elo.BASE_RATING)
             away_elo = ratings.get(away_team, elo.BASE_RATING)
             model_prob_home = elo.win_probability(home_elo, away_elo)
@@ -214,8 +223,7 @@ def ensure_fresh(sport: str, log=print) -> dict:
     """
     Run the pipeline for this sport only if it hasn't already run today --
     so opening the dashboard is instant after the first check of the day,
-    instead of re-pulling odds (and, for NBA, re-training Elo from a slow
-    rate-limited balldontlie fetch) on every single page load.
+    instead of re-pulling odds and re-training Elo on every single page load.
     """
     today = date.today().isoformat()
     last_run = db.get_setting(f"last_run_date_{sport}")

@@ -57,19 +57,19 @@ out. Stake sizing (`models/kelly.py`) uses fractional Kelly — default 30% of
 full Kelly — capped at **3 units max per bet**, so weaker edges naturally
 size down instead of being hidden entirely.
 
-## "Ball knowledge" tips (NBA only so far)
+## "Ball knowledge" tips (NBA, EPL, NBL, AFL)
 
 `knowledge/situational.py` is a separate rules engine, not tied to a priced
 edge. From schedule + results alone it flags things a sharp bettor would
 notice by hand: back-to-backs, rest advantages, win/loss streaks, and teams
 that are unusually bad at home or strong on the road. These get attached as
 extra reasoning on value tips, and also show up on their own as a daily
-"things to know" feed even when nothing is mispriced. This needs a results
-history to work from (currently only wired up for NBA via balldontlie — see
-`config.SPORT_CONFIG`'s `has_history` flag), so EPL doesn't have it yet. It's
-deliberately simple in v1 — obvious next upgrades are wiring in an
-injury-news feed and a results source for EPL (football-data.org is the
-usual free option).
+"things to know" feed even when nothing is mispriced. Needs a results-history
+source to work from -- `data/espn.py` (ESPN's public site API, no key
+needed) covers NBA/EPL/NBL/AFL (see `config.SPORT_CONFIG`'s `has_history`
+flag). NRL isn't on ESPN's public API (checked, 404s); cricket uses a
+different ESPN API shape not wired up yet. It's deliberately simple in v1 —
+the obvious next upgrade is wiring in an injury-news feed.
 
 ## Bonus Converter (matched betting)
 
@@ -95,16 +95,15 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-You need two free API keys — sign up yourself (not something I can do for
-you), then paste them into `.env`:
+You need one free API key — sign up yourself (not something I can do for
+you), then paste it into `.env`:
 
 - **The Odds API** — https://the-odds-api.com — free tier is 500 requests/
   month. This is what gives you real AU bookmaker odds (Sportsbet, TAB,
   Neds, Ladbrokes, Unibet, Betfair, etc.) to compare, for every sport.
-- **balldontlie** — https://balldontlie.io — free tier, used for NBA
-  schedules and final scores to train the Elo ratings and ball-knowledge
-  notes (`stats.nba.com` wasn't reachable from this sandboxed environment —
-  balldontlie is the workaround). Not needed for EPL.
+
+That's it for keys. Results history (for Elo + ball-knowledge notes) comes
+from ESPN's public site API (`data/espn.py`) — no signup, no key.
 
 Then run the dashboard:
 
@@ -151,9 +150,15 @@ a new sport, add an entry to `config.SPORT_CONFIG`:
 ```
 
 That alone gets you devig value tips with zero new accounts (The Odds API
-covers most sports). To get Elo context + ball-knowledge notes too, you'd
-also need a results-history data source for that sport (NFL: nfl_data_py or
-an odds-API-adjacent scores feed) and set `has_history: True`.
+covers most sports). To get Elo context + ball-knowledge notes too, check if
+ESPN's public site API covers it first (`data/espn.py` -- try
+`site.api.espn.com/apis/site/v2/sports/<espn_sport>/<espn_league>/teams` for
+the sport/league slug, same pattern as NBA/EPL/NBL/AFL), add
+`espn_sport`/`espn_league` to the config entry, work out that league's
+season-param convention (see `_espn_season_years` in
+`tips/generate_tips.py` -- it differs per league, verify empirically, don't
+guess), and set `has_history: True`. NFL is almost certainly on ESPN's API
+(`espn_sport="football"`, `espn_league="nfl"`) but untested here.
 
 Australian horse racing is a different shape of problem — no Elo-style team
 rating, instead form/speed-figure based probability per runner, and data
