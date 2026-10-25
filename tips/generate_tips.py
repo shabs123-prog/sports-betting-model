@@ -9,11 +9,14 @@ see that file to add a new sport.
 from datetime import date
 
 from config import (
+    AU_BOOKMAKERS,
     DEFAULT_MAX_UNITS_PER_BET,
     DEFAULT_MIN_EDGE_PCT,
     DEFAULT_TIER_UNITS_LEAN,
     DEFAULT_TIER_UNITS_MODERATE,
     DEFAULT_TIER_UNITS_STRONG,
+    SECONDARY_SHARP_REFERENCE_BOOKMAKER,
+    SHARP_REFERENCE_BOOKMAKER,
     SPORT_CONFIG,
     USER_BOOKMAKERS,
 )
@@ -21,6 +24,7 @@ from data import espn, odds_api
 from db import database as db
 from knowledge import situational
 from models import edge, elo
+from models.devig import devig_book
 from models.risk import risk_label
 from models.team_names import build_nickname_index, resolve
 
@@ -150,14 +154,35 @@ def run(sport: str = "nba", log=print) -> dict:
 
         game_had_value = False
         for market in cfg["markets"]:
-            outcome_points = odds_api.consensus_points(event, market)
-            books = odds_api.bookmaker_books(event, market, outcome_points)
+            # Point consensus and the "AU consensus" fair prob both stay
+            # AU-only -- Pinnacle quoting a different point, or being blended
+            # into the average, would dilute rather than sharpen the signal.
+            outcome_points = odds_api.consensus_points(event, market, allowed_bookmakers=AU_BOOKMAKERS)
+            books = odds_api.bookmaker_books(event, market, outcome_points, allowed_bookmakers=AU_BOOKMAKERS)
             if not books:
                 continue
-            fair_probs = edge.consensus_fair_probs(books)
-            # Fair probability uses every bookmaker (broader = more accurate
-            # consensus); the actual recommendation is restricted to accounts
-            # you hold, so every tip is one you can actually go place.
+            au_fair_probs = edge.consensus_fair_probs(books)
+
+            # Sharp reference chain: Pinnacle (lowest margin, industry
+            # standard benchmark) first, then Betfair Exchange (two-sided
+            # market, sharper than a fixed-odds book even though it's AU)
+            # when Pinnacle doesn't cover this market/point. A cluster of
+            # recreational AU books mostly just copies each other, which can
+            # converge tightly on itself without being especially accurate --
+            # only fall all the way back to that average if neither sharp
+            # source quotes the exact same point as the AU consensus.
+            sharp_fair_probs, sharp_source = {}, None
+            for ref_bookmaker in (SHARP_REFERENCE_BOOKMAKER, SECONDARY_SHARP_REFERENCE_BOOKMAKER):
+                prices = odds_api.single_bookmaker_prices(event, market, ref_bookmaker, outcome_points)
+                if len(prices) >= 2:
+                    sharp_fair_probs = devig_book(prices)
+                    sharp_source = ref_bookmaker
+                    break
+
+            # Fair probability uses whichever sharp reference covered this
+            # market/point, falling back to the AU bookmaker consensus; the
+            # actual recommendation is restricted to accounts you hold, so
+            # every tip is one you can actually go place.
             best_prices = odds_api.best_price_per_outcome(
                 event, market, outcome_points, allowed_bookmakers=USER_BOOKMAKERS
             )
@@ -166,7 +191,11 @@ def run(sport: str = "nba", log=print) -> dict:
                 decimal_odds = price_info["price"]
                 bookmaker = price_info["bookmaker"]
                 point = price_info.get("point")
-                fair_prob = fair_probs.get(outcome_name)
+                fair_prob = sharp_fair_probs.get(outcome_name)
+                fair_prob_source = sharp_source
+                if fair_prob is None:
+                    fair_prob = au_fair_probs.get(outcome_name)
+                    fair_prob_source = "AU consensus"
                 if fair_prob is None:
                     continue
 
@@ -188,8 +217,8 @@ def run(sport: str = "nba", log=print) -> dict:
                     units = _tier_units(tier, settings)
                     risk = risk_label(fair_prob)
                     reasoning_parts = [
-                        f"[{tier} edge · {risk}] No-vig market-consensus probability: {fair_prob:.1%} vs "
-                        f"price-implied {1/decimal_odds:.1%} ({devig_edge_pct:+.1%} edge) at {bookmaker}.",
+                        f"[{tier} edge · {risk}] No-vig fair probability ({fair_prob_source}): {fair_prob:.1%} "
+                        f"vs price-implied {1/decimal_odds:.1%} ({devig_edge_pct:+.1%} edge) at {bookmaker}.",
                     ]
                     if model_prob is not None:
                         disagreement = abs(model_prob - fair_prob)

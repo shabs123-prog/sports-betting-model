@@ -1,11 +1,11 @@
 # Sports Betting Model
 
-A value-betting tool: pulls live odds across AU bookmakers, finds prices that
-disagree with the rest of the market, suggests a stake in units, and tracks
-your results. **NBA** (with Elo model context + ball-knowledge notes) and
-**EPL/NBL/NRL/AFL/BBL** (devig only, for now) work end-to-end, across
-moneyline, spreads/handicap, and totals markets. NFL and Australian horse
-racing slot into the same pattern later (see "Extending to other sports").
+A value-betting tool: pulls live odds across AU bookmakers, compares them
+against a sharp reference line, suggests a stake in units, and tracks your
+results. NBA/EPL/NBL/AFL/NFL have Elo model context + ball-knowledge notes;
+NRL/BBL are devig-only (see `config.SPORT_CONFIG`). Australian horse racing
+has a placeholder tab but no real data behind it yet (see "Extending to
+other sports").
 
 **Only recommends bookmakers you can actually bet at.** `config.USER_BOOKMAKERS`
 restricts every tip's "best price" to accounts you hold — the fair-probability
@@ -19,29 +19,62 @@ re-check which bookmakers are currently in the data and update the list in
 
 ## How it finds "value"
 
-Two signals, reported together on every NBA tip (EPL gets the first one
-only, for now — see below):
+Fair probability comes from a **sharp-reference chain**, tried in order per
+market/outcome (`tips/generate_tips.py`):
 
-1. **Devig edge (primary signal, drives every tip).** Every bookmaker bakes
-   a margin ("vig") into their odds. `models/devig.py` strips that out
-   per-bookmaker, then `models/edge.py` averages across every AU bookmaker
-   pricing the game to get a no-vig *consensus* probability. If one
-   bookmaker's price is better than that consensus implies, that's an edge —
-   and it doesn't depend on your own model being right. This is the same
-   idea behind tools like OddsJam/Outlier/your friend's "Lineboard": find the
-   bookmaker who disagrees with the rest of the market. Works the same way
-   for spreads and totals, except the comparison only happens between books
-   quoting the *same* line (`odds_api.consensus_points` picks the line most
-   books agree on; a -4.5 price is never devigged against a -6.5 one).
-2. **Elo model context (NBA only, supporting signal — never sizes a stake).**
-   `models/elo.py` is a margin-of-victory Elo rating system (the approach
-   FiveThirtyEight popularised for NBA), trained on this season's results.
-   It's reported alongside the devig numbers on h2h tips as a sanity check —
-   "model roughly agrees" or "model disagrees sharply, treat as noise." It
-   does **not** gate or size anything; an earlier version of this code let a
-   noisy single-season Elo number override the market consensus, which
-   would've pushed max-size bets on model error. Elo doesn't predict spread/
-   total outcomes, so it's h2h-only.
+1. **Pinnacle** (`config.SHARP_REFERENCE_BOOKMAKER`) — low-margin, used
+   industry-wide as a "true odds" benchmark. The Odds API doesn't carry it
+   under the `au` region, so `config.ODDS_API_REGION` also pulls `eu` (costs
+   roughly double the API quota per call — see "API quota" below).
+2. **Betfair Exchange** (`config.SECONDARY_SHARP_REFERENCE_BOOKMAKER`) — a
+   two-sided market, sharper than a fixed-odds book, used when Pinnacle
+   doesn't quote that exact market/point.
+3. **AU bookmaker consensus** (`models/edge.consensus_fair_probs`) — every
+   AU book's own price, devigged and averaged. Fallback only: a cluster of
+   recreational books mostly copies each other, which converges tightly on
+   itself without necessarily being accurate, so this is used only when
+   neither sharp source covers the market.
+
+Whichever source applies, the devig/comparison math is the same: strip the
+bookmaker's margin (`models/devig.py`), and if one of *your* bookmakers'
+prices beats that fair line, that's an edge — the same idea behind tools
+like OddsJam/Outlier/your friend's "Lineboard". Works for spreads and totals
+too, except the comparison only happens between books quoting the *same*
+line (`odds_api.consensus_points`; a -4.5 price is never compared against a
+-6.5 one).
+
+**Elo model context** (NBA/EPL/NBL/AFL/NFL, supporting signal — never sizes
+a stake). `models/elo.py` is a margin-of-victory Elo rating system (the
+approach FiveThirtyEight popularised for NBA), trained on this season's
+results via ESPN. Reported alongside the fair-probability numbers on h2h
+tips as a sanity check — "model roughly agrees" or "model disagrees
+sharply, treat as noise." It does **not** gate or size anything; an earlier
+version of this code let a noisy single-season Elo number override the
+market, which would've pushed max-size bets on model error. Elo doesn't
+predict spread/total outcomes, so it's h2h-only.
+
+### Multis (`models/multis.py`)
+
+Combines several of the current +EV singles from *different* games into one
+bet — legitimate, since multiplying independent probabilities together is
+correct (unlike a same-game multi, where the legs are correlated and need
+real correlation data or bookmaker-priced SGM odds, neither of which this
+data source has — checked: `sgm` isn't a valid market on The Odds API).
+Legs priced beyond `MAX_LEG_ODDS` (4.0) are excluded from multi-building,
+since stacking longshots compounds into absurd combined odds at a
+single-digit hit chance. Every combo reports edge **and** the realistic
+chance every leg lands — don't read one without the other.
+
+### API quota
+
+Billing is `markets × regions`, and every call now requests `au,eu`
+(for Pinnacle) regardless of whether Pinnacle ends up covering that
+market — so 3 markets x 2 regions = 6 credits per sport per refresh, up
+from 3 before. With NBA/EPL/NFL auto-refreshing daily: 18 credits/day ≈
+540/month, which is **over** the free tier's 500/month if run every single
+day without fail. Drop a sport from `auto_refresh` in `config.SPORT_CONFIG`,
+or run less than daily, if you're hitting the limit -- or upgrade to a paid
+Odds API tier if you want to auto-refresh more sports/more often.
 
 Every value tip gets two independent labels:
 
@@ -132,8 +165,10 @@ your phone.
 ## Using it day to day
 
 1. **This Week** — best picks across every sport for the next 7 days, not
-   just today/tonight — a few "standout" Line/Handicap picks in the 1.7-2.2
-   range pulled out up top, everything else below.
+   just today/tonight. A 🔥 Big Value Alert when something clears a high bar
+   (3%+ edge), a curated 5-pick Recommended list prioritising Line/Handicap +
+   1.7-2.2 odds, cross-game Multis (2-leg front and centre, 3-leg tucked in
+   an expander), then everything else collapsed below.
 2. **One tab per sport** (NBA, EPL, NBL, NFL, NRL, AFL, BBL) — that sport's
    Value Bets (pick, bookmaker, price, edge, units, risk) and Ball Knowledge
    notes together, looking ~2 weeks ahead, with a manual Refresh button.

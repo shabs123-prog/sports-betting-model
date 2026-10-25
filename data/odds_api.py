@@ -37,21 +37,25 @@ def fetch_odds(sport_key: str, markets: str = "h2h", region: str = ODDS_API_REGI
     return resp.json()
 
 
-def consensus_points(event: dict, market_key: str) -> dict:
+def consensus_points(event: dict, market_key: str, allowed_bookmakers: set | None = None) -> dict:
     """
-    {outcome_name: most_common_point} across every bookmaker, for markets that
+    {outcome_name: most_common_point} across bookmakers, for markets that
     carry a handicap/total line ("spreads", "totals"). h2h outcomes have no
     point (always None), so this degenerates to a trivial no-op there.
 
     Point matters because -4.5 and -6.5 are different bets -- devigging a
     -4.5 price against a -6.5 price as if they were the same market would be
     meaningless. We only compare prices at whichever line most bookmakers
-    agree on.
+    agree on. Pass allowed_bookmakers to keep this to AU books specifically,
+    so a sharp reference book quoting a different point doesn't skew it.
     """
     from collections import Counter
 
     points_by_outcome: dict[str, list] = {}
     for bm in event.get("bookmakers", []):
+        name = bm.get("title", bm.get("key"))
+        if allowed_bookmakers is not None and name not in allowed_bookmakers:
+            continue
         for market in bm.get("markets", []):
             if market.get("key") != market_key:
                 continue
@@ -98,16 +102,25 @@ def best_price_per_outcome(
     return best
 
 
-def bookmaker_books(event: dict, market_key: str = "h2h", outcome_points: dict | None = None) -> list[dict]:
+def bookmaker_books(
+    event: dict,
+    market_key: str = "h2h",
+    outcome_points: dict | None = None,
+    allowed_bookmakers: set | None = None,
+) -> list[dict]:
     """
     One entry per bookmaker that priced this market:
     [{"bookmaker": title, "prices": {outcome_name: decimal_price, ...}}, ...]
     Used for devigging (need one bookmaker's full, self-consistent market at a
     time). If outcome_points is given, only includes a bookmaker's quote for
-    an outcome when it matches that exact line.
+    an outcome when it matches that exact line. If allowed_bookmakers is
+    given, only those bookmakers are considered.
     """
     books = []
     for bm in event.get("bookmakers", []):
+        name = bm.get("title", bm.get("key"))
+        if allowed_bookmakers is not None and name not in allowed_bookmakers:
+            continue
         for market in bm.get("markets", []):
             if market.get("key") != market_key:
                 continue
@@ -117,5 +130,30 @@ def bookmaker_books(event: dict, market_key: str = "h2h", outcome_points: dict |
                     continue
                 prices[o["name"]] = o["price"]
             if len(prices) >= 2:
-                books.append({"bookmaker": bm.get("title", bm.get("key")), "prices": prices})
+                books.append({"bookmaker": name, "prices": prices})
     return books
+
+
+def single_bookmaker_prices(
+    event: dict, market_key: str, bookmaker_name: str, outcome_points: dict | None = None
+) -> dict:
+    """
+    One named bookmaker's prices for this market: {outcome_name: decimal_price}.
+    Used to pull a sharp reference book's (e.g. Pinnacle) own line rather than
+    an average -- their price alone, lightly devigged, is a stronger fair-
+    probability estimate than averaging a cluster of recreational AU books
+    that mostly just copy each other.
+    """
+    for bm in event.get("bookmakers", []):
+        if bm.get("title", bm.get("key")) != bookmaker_name:
+            continue
+        for market in bm.get("markets", []):
+            if market.get("key") != market_key:
+                continue
+            prices = {}
+            for o in market.get("outcomes", []):
+                if outcome_points is not None and outcome_points.get(o["name"]) != o.get("point"):
+                    continue
+                prices[o["name"]] = o["price"]
+            return prices
+    return {}

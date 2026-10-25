@@ -20,7 +20,7 @@ from config import (
     USER_BOOKMAKERS,
 )
 from db import database as db
-from models import conversion_finder, matched_betting
+from models import conversion_finder, matched_betting, multis
 from models.risk import risk_label
 from tips.generate_tips import ensure_fresh
 from tips.generate_tips import run as run_pipeline
@@ -202,6 +202,45 @@ with tab_week:
         st.subheader(f"Recommended bets this week ({len(recommended)})")
         st.caption("Prioritises Line/Handicap and the 1.7-2.2 odds range — a short, curated list, not everything found.")
         render_value_cards(recommended.to_dict("records"), show_sport_header=True)
+
+        st.divider()
+        st.subheader("Multis (cross-game)")
+        st.caption(
+            "Combines several of this week's +EV singles from *different* games into one bet — "
+            "bigger combined odds out of picks that individually only show a thin edge. Only "
+            "combines across games (never two markets in the same match — that needs real "
+            "correlation data this tool doesn't have, see Horses-style caveat). Higher variance: "
+            "a multi only pays if every leg wins, so the 'chance all legs hit' number matters as "
+            "much as the edge."
+        )
+        combos = multis.suggest_multis(df.to_dict("records"))
+
+        def _render_multi_combo(combo):
+            with st.container(border=True):
+                st.markdown(f"**{combo['size']}-leg multi — combined odds {combo['combined_odds']}**")
+                for leg in combo["legs"]:
+                    st.markdown(
+                        f"- {leg['sport'].upper()}: {leg['matchup']} — "
+                        f"{MARKET_LABEL.get(leg['market'], leg['market'])} {leg['selection']} "
+                        f"@ {leg['odds_decimal']} ({leg['bookmaker']})"
+                    )
+                c1, c2 = st.columns(2)
+                c1.metric("Combined edge", f"{combo['combined_edge_pct']:+.1%}")
+                c2.metric("Chance all legs hit", f"{combo['implied_hit_pct']:.1%}")
+
+        if not combos:
+            st.caption("Not enough picks across different games (odds ≤ 4.0) this week to build one.")
+        else:
+            two_leg = [c for c in combos if c["size"] == 2][:4]
+            three_leg = [c for c in combos if c["size"] == 3][:3]
+            if two_leg:
+                st.markdown("**2-leg — the more sensible starting point**")
+                for combo in two_leg:
+                    _render_multi_combo(combo)
+            if three_leg:
+                with st.expander(f"3-leg — noticeably higher variance ({len(three_leg)})"):
+                    for combo in three_leg:
+                        _render_multi_combo(combo)
 
         rest = df.drop(recommended.index)
         if not rest.empty:

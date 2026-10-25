@@ -36,20 +36,39 @@ DEFAULT_TIER_UNITS_STRONG = float(_get_secret("TIER_UNITS_STRONG", "2.5"))
 DEFAULT_TIER_UNITS_MODERATE = float(_get_secret("TIER_UNITS_MODERATE", "1.75"))
 DEFAULT_TIER_UNITS_LEAN = float(_get_secret("TIER_UNITS_LEAN", "1.0"))
 
-# Odds API region -- 'au' returns AU-licensed bookmakers. As of testing,
-# that's: SportsBet, PointsBet (AU), TAB, TABtouch, Ladbrokes, Neds, Unibet,
-# Betfair, PlayUp, Betr, Bet Right, Picklebet (AU). Note: Bet365 and Dabble
-# do NOT appear in this API's data at all -- they're not available to price
-# or recommend through this tool, full stop.
-ODDS_API_REGION = "au"
+# Odds API regions -- 'au' is the AU-licensed bookmakers you can actually bet
+# at. 'eu' is added to also pull Pinnacle -- a sharp, low-margin reference
+# book used industry-wide as a "true odds" benchmark, precisely because
+# averaging a cluster of recreational AU books (which mostly just copy each
+# other) tends to converge tightly on itself without being especially
+# accurate. Comparing AU prices against Pinnacle's line instead of (or
+# alongside) the AU consensus surfaces edge that a same-region-only
+# comparison misses. Cost note: billing is markets x regions, so adding 'eu'
+# roughly doubles API quota use per call -- see README for the budget math.
+# As of testing, 'au' bookmakers are: SportsBet, PointsBet (AU), TAB,
+# TABtouch, Ladbrokes, Neds, Unibet, Betfair, PlayUp, Betr, Bet Right,
+# Picklebet (AU). Note: Bet365 and Dabble do NOT appear in this API's data
+# at all -- they're not available to price or recommend through this tool.
+ODDS_API_REGION = "au,eu"
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+
+AU_BOOKMAKERS = {
+    "SportsBet", "PointsBet (AU)", "TAB", "TABtouch", "Ladbrokes", "Neds",
+    "Unibet", "Betfair", "PlayUp", "Betr", "Bet Right", "Picklebet (AU)",
+}
+SHARP_REFERENCE_BOOKMAKER = "Pinnacle"
+# Betfair Exchange is a two-sided market (you can back or lay), which makes
+# it sharper than a fixed-odds recreational book even though it's AU-based --
+# used as a second sharp opinion when Pinnacle doesn't cover a market/point.
+SECONDARY_SHARP_REFERENCE_BOOKMAKER = "Betfair"
 
 # Bookmakers you actually hold accounts with. "Best price" recommendations
 # are restricted to this list so every tip is one you can actually place --
 # the fair-probability consensus still uses every AU bookmaker The Odds API
-# returns, since more books = a more accurate consensus. Must match the
-# "title" strings above exactly; run `python -m scripts.list_bookmakers` if
-# the API's naming ever changes.
+# returns (AU_BOOKMAKERS), since more books = a more accurate consensus, and
+# Pinnacle's own line is used as a sharper benchmark when it's available at
+# the same point. Must match the "title" strings above exactly; run
+# `python -m scripts.list_bookmakers` if the API's naming ever changes.
 USER_BOOKMAKERS = {"SportsBet", "PointsBet (AU)", "TAB", "Ladbrokes", "Betfair"}
 
 # "has_history": True means we have a results data source to train the Elo
