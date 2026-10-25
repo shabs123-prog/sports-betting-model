@@ -8,6 +8,14 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
+from config import (
+    DEFAULT_BANKROLL_AMOUNT,
+    DEFAULT_KELLY_FRACTION,
+    DEFAULT_MAX_UNITS_PER_BET,
+    DEFAULT_MIN_EDGE_PCT,
+    DEFAULT_UNIT_SIZE_PCT,
+    SPORT_CONFIG,
+)
 from db import database as db
 from models.risk import risk_label
 from tips.generate_tips import run as run_pipeline
@@ -21,8 +29,8 @@ st.caption(
     "You place every bet yourself. Bet within your means; this is not financial advice."
 )
 
-tab_tips, tab_run, tab_tracker, tab_perf, tab_settings = st.tabs(
-    ["Today's Tips", "Run Pipeline", "Bet Tracker", "Performance", "Settings"]
+tab_tips, tab_knowledge, tab_run, tab_tracker, tab_perf, tab_settings = st.tabs(
+    ["Today's Tips", "Ball Knowledge", "Run Pipeline", "Bet Tracker", "Performance", "Settings"]
 )
 
 # ---------------------------------------------------------------- Today's Tips
@@ -33,7 +41,6 @@ with tab_tips:
     date_str = selected_date.isoformat()
 
     value_tips = db.get_tips_for_date(date_str, tip_type="value")
-    knowledge_tips = db.get_tips_for_date(date_str, tip_type="knowledge")
 
     RISK_ORDER = ["Not Risky", "Neutral", "Risky"]
     TIP_COLUMNS = {
@@ -64,20 +71,32 @@ with tab_tips:
     else:
         st.info("No priced value tips for this date yet. Run the pipeline from the 'Run Pipeline' tab.")
 
-    st.subheader("Ball knowledge notes")
+# ---------------------------------------------------------------- Ball Knowledge
+with tab_knowledge:
+    st.caption(
+        "Situational context, not priced edges: rest/schedule, form streaks, home/away splits. "
+        "Currently only wired up for NBA — other sports need their own results-history source "
+        "(see README) before they can get this."
+    )
+    kn_date = st.date_input("Game date", value=date.today(), key="knowledge_date")
+    knowledge_tips = db.get_tips_for_date(kn_date.isoformat(), tip_type="knowledge")
+
     if knowledge_tips:
         for sport in sorted({t["sport"] for t in knowledge_tips}):
-            st.markdown(f"**{sport.upper()}**")
+            st.subheader(sport.upper())
             for t in knowledge_tips:
                 if t["sport"] == sport:
-                    st.markdown(f"- **{t['matchup']}** — {t['reasoning']}")
+                    with st.container(border=True):
+                        st.markdown(f"**{t['matchup']}**")
+                        st.write(t["reasoning"])
     else:
-        st.caption("No standalone situational notes for this date.")
+        st.info("No situational notes for this date yet. Run the NBA pipeline from the 'Run Pipeline' tab.")
 
 # ---------------------------------------------------------------- Run Pipeline
 with tab_run:
     st.write("Pulls live odds + schedule data and regenerates today's tips.")
-    sport = st.selectbox("Sport", ["nba", "epl"], index=0)
+    sport = st.selectbox("Sport", list(SPORT_CONFIG.keys()), index=0,
+                          format_func=lambda s: s.upper())
     if st.button("Run pipeline now", type="primary"):
         log_box = st.empty()
         logs = []
@@ -193,11 +212,11 @@ with tab_perf:
 # ---------------------------------------------------------------- Settings
 with tab_settings:
     st.subheader("Bankroll & staking")
-    bankroll = st.number_input("Bankroll ($)", min_value=0.0, value=float(db.get_setting("bankroll_amount", "1000")), step=50.0)
-    unit_pct = st.number_input("Unit size (% of bankroll)", min_value=0.1, max_value=10.0, value=float(db.get_setting("unit_size_pct", "0.01")) * 100, step=0.1) / 100
-    kelly_frac = st.slider("Kelly fraction (lower = more conservative)", 0.0, 1.0, float(db.get_setting("kelly_fraction", "0.3")), 0.05)
-    max_units = st.number_input("Max units per bet", min_value=0.5, value=float(db.get_setting("max_units_per_bet", "5")), step=0.5)
-    min_edge = st.slider("Minimum edge to flag a tip", 0.0, 0.2, float(db.get_setting("min_edge_pct", "0.03")), 0.005, format="%.1f%%")
+    bankroll = st.number_input("Bankroll ($)", min_value=0.0, value=float(db.get_setting("bankroll_amount", str(DEFAULT_BANKROLL_AMOUNT))), step=50.0)
+    unit_pct = st.number_input("Unit size (% of bankroll)", min_value=0.1, max_value=10.0, value=float(db.get_setting("unit_size_pct", str(DEFAULT_UNIT_SIZE_PCT))) * 100, step=0.1) / 100
+    kelly_frac = st.slider("Kelly fraction (lower = more conservative)", 0.0, 1.0, float(db.get_setting("kelly_fraction", str(DEFAULT_KELLY_FRACTION))), 0.05)
+    max_units = st.number_input("Max units per bet", min_value=0.5, value=float(db.get_setting("max_units_per_bet", str(DEFAULT_MAX_UNITS_PER_BET))), step=0.5)
+    min_edge = st.slider("Minimum edge to flag a tip", 0.0, 0.2, float(db.get_setting("min_edge_pct", str(DEFAULT_MIN_EDGE_PCT))), 0.005, format="%.1f%%")
 
     if st.button("Save settings"):
         db.set_setting("bankroll_amount", bankroll)

@@ -51,4 +51,30 @@ SPORT_CONFIG = {
         "has_history": False,
         "markets": ["h2h", "spreads", "totals"],
     },
+    "nbl": {
+        "odds_key": "basketball_nbl",
+        "has_history": False,
+        "markets": ["h2h", "spreads", "totals"],
+    },
+    # NRL/AFL are off-season for part of the year -- that's not a bug, the
+    # pipeline just returns 0 events until the season starts. Worth running
+    # anyway once it's close (check theoddsapi.com or just try it).
+    "nrl": {
+        "odds_key": "rugbyleague_nrl",
+        "has_history": False,
+        "markets": ["h2h", "spreads", "totals"],
+    },
+    "afl": {
+        "odds_key": "aussierules_afl",
+        "has_history": False,
+        "markets": ["h2h", "spreads", "totals"],
+    },
+    # Cricket markets on The Odds API are structured differently (run lines,
+    # not point spreads) -- starting with h2h only until that's tested against
+    # live Big Bash data (season starts December).
+    "bbl": {
+        "odds_key": "cricket_big_bash",
+        "has_history": False,
+        "markets": ["h2h"],
+    },
 }
