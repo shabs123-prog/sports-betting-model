@@ -179,7 +179,13 @@ extra reasoning on Value/Prediction tips, **and** always get their own
 standalone Ball Knowledge card too -- an earlier version skipped the
 standalone card whenever the game already had a priced tip, which made the
 tab look far sparser than the actual situational-note coverage really was.
-Needs a results-history
+Each card also shows the odds/units/bookmaker of the best priced tip on
+that game (a value tip first, a prediction tip as fallback), restricted to
+the same 1.6-2.2 odds range as everywhere else -- so it tells you what to
+actually bet, not just the context, without resurrecting longshot picks as
+a "headline" bet outside that range. A game with only situational notes and
+no priced/predicted pick in range just shows the description, since there's
+no real bet to attach. Needs a results-history
 source to work from -- `data/espn.py` (ESPN's public site API, no key
 needed) covers NBA/EPL/NBL/AFL (see `config.SPORT_CONFIG`'s `has_history`
 flag). NRL isn't on ESPN's public API (checked, 404s); cricket uses a

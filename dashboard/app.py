@@ -104,8 +104,13 @@ def render_value_cards(tips: list, show_sport_header: bool = False, show_exclude
 
 
 def render_knowledge_cards(tips: list, show_sport_header: bool = False):
-    """Ball-knowledge cards -- description only, deliberately no odds/units
-    since this is situational context, not a priced bet."""
+    """
+    Ball-knowledge cards -- the situational write-up, plus the bet it's
+    attached to when one exists (the best value tip on that game, or failing
+    that a prediction tip -- see linked_bet in tips/generate_tips.py). A note
+    with no priced or predicted pick on its game just shows the description,
+    since there's no real bet to show odds/units for.
+    """
     if not tips:
         st.caption("No situational notes for this view right now.")
         return
@@ -119,6 +124,12 @@ def render_knowledge_cards(tips: list, show_sport_header: bool = False):
             with st.container(border=True):
                 st.markdown(f"**{t['matchup']}** · {t['game_date']}")
                 st.write(t["reasoning"])
+                if t.get("bookmaker") and t.get("odds_decimal"):
+                    label = MARKET_LABEL.get(t["market"], t["market"])
+                    st.markdown(
+                        f"Linked bet: **{label}** · {t['selection']} @ **{t['odds_decimal']}** · "
+                        f"{t['bookmaker']} · {t['suggested_units']:g}u"
+                    )
 
 
 MAX_PREDICTIONS_PER_SPORT = 4  # "3-4 bets a day" -- best 4 shown; rest in an expander, not dropped

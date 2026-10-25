@@ -177,6 +177,7 @@ def run(sport: str = "nba", log=print) -> dict:
 
         model_probs = {}
         notes = []
+        linked_bet = None  # best priced tip found for this game, attached to its Ball Knowledge note
         if cfg["has_history"]:
             home_team = resolve(home_odds_name, canonical_names, nickname_index) or home_odds_name
             away_team = resolve(away_odds_name, canonical_names, nickname_index) or away_odds_name
@@ -275,6 +276,25 @@ def run(sport: str = "nba", log=print) -> dict:
                     if outcome_name in (home_odds_name, away_odds_name) and notes:
                         reasoning_parts.extend(notes)
 
+                    # Highest-edge value tip on this game becomes the bet shown
+                    # alongside its Ball Knowledge note below -- so the card with
+                    # the situational context also tells you what to actually bet.
+                    # Restricted to the same single-odds range as everywhere else
+                    # (1.6-2.2 by default): a longshot value tip still gets
+                    # generated and shown in its own tab's collapsed "outside
+                    # range" expander, but shouldn't become the headline bet on
+                    # a Ball Knowledge card, which has no such expander to hide it in.
+                    in_preferred_range = settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]
+                    if in_preferred_range and (linked_bet is None or devig_edge_pct > linked_bet["edge_pct"]):
+                        linked_bet = {
+                            "market": market,
+                            "selection": _format_selection(outcome_name, point, market),
+                            "bookmaker": bookmaker,
+                            "odds_decimal": decimal_odds,
+                            "suggested_units": units,
+                            "edge_pct": devig_edge_pct,
+                        }
+
                     db.insert_tip({
                         "game_date": game_date,
                         "sport": sport,
@@ -336,6 +356,18 @@ def run(sport: str = "nba", log=print) -> dict:
                     "reasoning": " ".join(reasoning_parts),
                 })
                 prediction_tips += 1
+                # Only fall back to a prediction as the linked bet when no
+                # actual value tip was found on this game -- a verified edge
+                # always outranks a model lean as "the bet to show".
+                if linked_bet is None:
+                    linked_bet = {
+                        "market": "h2h",
+                        "selection": outcome_name,
+                        "bookmaker": price_info["bookmaker"],
+                        "odds_decimal": decimal_odds,
+                        "suggested_units": PREDICTION_UNITS,
+                        "edge_pct": -1.0,
+                    }
 
         # Always log situational notes as their own Ball Knowledge entry, even
         # when this game also produced a Value/Prediction tip (whose reasoning
@@ -344,19 +376,25 @@ def run(sport: str = "nba", log=print) -> dict:
         # get a priced pick. An earlier version skipped this whenever
         # game_had_value was True, which made the tab look far sparser than
         # the actual situational-note coverage really was.
+        #
+        # Odds/units/bookmaker: attach linked_bet (the best value tip on this
+        # game, or failing that the prediction tip) when one exists, so the
+        # card tells you what to actually bet alongside the context -- not
+        # just description. When neither exists there's no real bet to show,
+        # so those fields stay empty rather than inventing one.
         if notes:
             db.insert_tip({
                 "game_date": game_date,
                 "sport": sport,
                 "matchup": matchup,
-                "market": "h2h",
-                "selection": "—",
-                "bookmaker": None,
-                "odds_decimal": None,
+                "market": linked_bet["market"] if linked_bet else "h2h",
+                "selection": linked_bet["selection"] if linked_bet else "—",
+                "bookmaker": linked_bet["bookmaker"] if linked_bet else None,
+                "odds_decimal": linked_bet["odds_decimal"] if linked_bet else None,
                 "model_prob": model_probs.get(home_odds_name),
                 "market_fair_prob": None,
                 "edge_pct": None,
-                "suggested_units": 0,
+                "suggested_units": linked_bet["suggested_units"] if linked_bet else 0,
                 "tip_type": "knowledge",
                 "reasoning": " ".join(notes),
             })
