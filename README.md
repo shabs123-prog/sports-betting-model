@@ -53,13 +53,17 @@ version of this code let a noisy single-season Elo number override the
 market, which would've pushed max-size bets on model error. Elo doesn't
 predict spread/total outcomes, so it's h2h-only.
 
-### Odds cap, Multis, and SGM
+### Odds range, Multis, and SGM
 
-`config.DEFAULT_MAX_SINGLE_ODDS` (2.2, Settings-configurable) is a hard
-ceiling on the dashboard's main "Value Bets"/"Predictions" views — not a
-soft discount zone. Anything priced higher still gets found and stored
-(useful for Performance history and as multi-leg candidates) but is tucked
-into a collapsed "not shown by default" expander instead of the normal feed.
+`config.DEFAULT_MIN_SINGLE_ODDS`/`DEFAULT_MAX_SINGLE_ODDS` (1.6-2.2,
+Settings-configurable) is a hard range on the dashboard's main "Value
+Bets"/"Predictions" views — not a soft discount zone. Predictions are
+filtered to this range at generation time (no point surfacing a 1.24-odds
+"lean"); value tips are still found/stored outside it regardless (useful
+for Performance history and as multi-leg candidates — multis/SGM have no
+minimum leg odds, so a short leg below the range can still combine into a
+sensible-priced multi) but are tucked into a collapsed "not shown by
+default" expander instead of the normal feed.
 
 `models/multis.py` has two combo builders, both under the same two hard
 rules: every leg must be at the **same bookmaker** (a multi is one bet slip
@@ -100,10 +104,11 @@ win probability by ignoring the draw entirely, so EPL doesn't get this
 until the model is draw-aware. Also requires `model_prob >= 0.55` and
 `model_prob >= implied_prob` of the price (the model has to actually think
 the price is fair-or-better, not just be split 51/49), and respects the
-same `max_single_odds` cap as everything else. Capped at
-`MAX_PREDICTIONS_PER_SPORT` (4) shown per sport in the dashboard — a model
-can clear the bar on a dozen games in one slate, which isn't "a few bets a
-day" any more.
+same `min_single_odds`/`max_single_odds` range as everything else. Best
+`MAX_PREDICTIONS_PER_SPORT` (4) shown per sport in the dashboard by model
+confidence — a model can clear the bar on a dozen games in one slate, which
+isn't "a few bets a day" any more — the rest aren't dropped, just tucked
+into an expander.
 
 ### API quota
 

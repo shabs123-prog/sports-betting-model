@@ -13,6 +13,7 @@ from config import (
     DEFAULT_MAX_SINGLE_ODDS,
     DEFAULT_MAX_UNITS_PER_BET,
     DEFAULT_MIN_EDGE_PCT,
+    DEFAULT_MIN_SINGLE_ODDS,
     DEFAULT_TIER_UNITS_LEAN,
     DEFAULT_TIER_UNITS_MODERATE,
     DEFAULT_TIER_UNITS_STRONG,
@@ -41,8 +42,10 @@ MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line"}
 WEEK_AHEAD_DAYS = 14  # how far out each sport tab looks -- value isn't just day-of
 
 
-def _max_single_odds() -> float:
-    return float(db.get_setting("max_single_odds", str(DEFAULT_MAX_SINGLE_ODDS)))
+def _odds_range() -> tuple[float, float]:
+    lo = float(db.get_setting("min_single_odds", str(DEFAULT_MIN_SINGLE_ODDS)))
+    hi = float(db.get_setting("max_single_odds", str(DEFAULT_MAX_SINGLE_ODDS)))
+    return lo, hi
 
 
 def _render_one_tip_card(t):
@@ -60,11 +63,12 @@ def _render_one_tip_card(t):
 
 def render_value_cards(tips: list, show_sport_header: bool = False, show_excluded: bool = True):
     """
-    Card feed for value-tip rows, hard-capped at max_single_odds (Settings,
-    default 2.2) -- not a soft discount zone, an actual ceiling. Anything
-    priced above that still gets generated/stored (useful data -- e.g. for
-    Performance history) but is tucked into a collapsed expander here
-    instead of shown as a normal recommendation.
+    Card feed for value-tip rows, hard-ranged to [min_single_odds,
+    max_single_odds] (Settings, default 1.6-2.2) -- not a soft discount
+    zone, an actual floor and ceiling. Anything outside it still gets
+    generated/stored (useful data -- e.g. for Performance history) but is
+    tucked into a collapsed expander here instead of shown as a normal
+    recommendation.
     """
     if not tips:
         st.info("No value bets for this view right now.")
@@ -75,16 +79,16 @@ def render_value_cards(tips: list, show_sport_header: bool = False, show_exclude
     df["risk_rank"] = df["risk"].map(RISK_ORDER.index)
     df["market_label"] = df["market"].map(lambda m: MARKET_LABEL.get(m, m))
 
-    cap = _max_single_odds()
-    within_cap = df[df["odds_decimal"] <= cap]
-    above_cap = df[df["odds_decimal"] > cap]
+    lo, hi = _odds_range()
+    in_range = df[(df["odds_decimal"] >= lo) & (df["odds_decimal"] <= hi)]
+    outside_range = df[(df["odds_decimal"] < lo) | (df["odds_decimal"] > hi)]
 
-    if within_cap.empty:
-        st.info(f"No value bets at {cap:g} odds or under for this view right now.")
+    if in_range.empty:
+        st.info(f"No value bets in the {lo:g}-{hi:g} odds range for this view right now.")
     else:
-        sports = sorted(within_cap["sport"].unique()) if show_sport_header else [None]
+        sports = sorted(in_range["sport"].unique()) if show_sport_header else [None]
         for sport in sports:
-            sport_df = within_cap if sport is None else within_cap[within_cap["sport"] == sport]
+            sport_df = in_range if sport is None else in_range[in_range["sport"] == sport]
             if sport_df.empty:
                 continue
             shown = sport_df.sort_values(["risk_rank", "edge_pct"], ascending=[True, False])
@@ -93,9 +97,9 @@ def render_value_cards(tips: list, show_sport_header: bool = False, show_exclude
             for _, t in shown.iterrows():
                 _render_one_tip_card(t)
 
-    if show_excluded and not above_cap.empty:
-        with st.expander(f"Above {cap:g} odds, not shown by default ({len(above_cap)})"):
-            for _, t in above_cap.sort_values("edge_pct", ascending=False).iterrows():
+    if show_excluded and not outside_range.empty:
+        with st.expander(f"Outside {lo:g}-{hi:g} odds, not shown by default ({len(outside_range)})"):
+            for _, t in outside_range.sort_values("edge_pct", ascending=False).iterrows():
                 _render_one_tip_card(t)
 
 
@@ -117,16 +121,28 @@ def render_knowledge_cards(tips: list, show_sport_header: bool = False):
                 st.write(t["reasoning"])
 
 
-MAX_PREDICTIONS_PER_SPORT = 4  # "3-4 bets a day" -- don't flood with every model lean
+MAX_PREDICTIONS_PER_SPORT = 4  # "3-4 bets a day" -- best 4 shown; rest in an expander, not dropped
+
+
+def _render_one_prediction_card(t):
+    with st.container(border=True):
+        st.markdown(f"**{t['matchup']}** · {t['game_date']}")
+        st.markdown(
+            f"**{t['market_label']}** · {t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}"
+        )
+        c1, c2 = st.columns([1, 2])
+        c1.metric("Units", f"{t['suggested_units']:g}")
+        c2.markdown(f"Model confidence: **{t['model_prob']:.1%}**")
+        st.caption(t["reasoning"])
 
 
 def render_prediction_cards(tips: list, show_sport_header: bool = False):
     """
     Model leans -- no confirmed market edge, so unlike render_value_cards
     there's no risk/edge column (market_fair_prob and edge_pct are both None
-    for these). Shows the model's own confidence instead. Capped per sport
-    at the model's most confident picks -- a model can clear the bar on a
-    dozen games in one slate, which isn't "3-4 bets a day" any more.
+    for these). Shows the model's own confidence instead. Best
+    MAX_PREDICTIONS_PER_SPORT shown per sport, by model confidence; the rest
+    aren't dropped, just tucked into an expander you can open.
     """
     if not tips:
         st.caption("No model predictions for this view right now.")
@@ -138,23 +154,16 @@ def render_prediction_cards(tips: list, show_sport_header: bool = False):
         sport_df = df if sport is None else df[df["sport"] == sport]
         if sport_df.empty:
             continue
-        shown = sport_df.sort_values("model_prob", ascending=False)
-        hidden = max(0, len(shown) - MAX_PREDICTIONS_PER_SPORT)
-        shown = shown.head(MAX_PREDICTIONS_PER_SPORT)
+        ranked = sport_df.sort_values("model_prob", ascending=False)
+        shown, rest = ranked.head(MAX_PREDICTIONS_PER_SPORT), ranked.iloc[MAX_PREDICTIONS_PER_SPORT:]
         if sport is not None:
             st.markdown(f"#### {sport.upper()}")
         for _, t in shown.iterrows():
-            with st.container(border=True):
-                st.markdown(f"**{t['matchup']}** · {t['game_date']}")
-                st.markdown(
-                    f"**{t['market_label']}** · {t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}"
-                )
-                c1, c2 = st.columns([1, 2])
-                c1.metric("Units", f"{t['suggested_units']:g}")
-                c2.markdown(f"Model confidence: **{t['model_prob']:.1%}**")
-                st.caption(t["reasoning"])
-        if hidden > 0:
-            st.caption(f"+ {hidden} more prediction(s) not shown, to keep this to a handful a day.")
+            _render_one_prediction_card(t)
+        if not rest.empty:
+            with st.expander(f"{len(rest)} more prediction(s)"):
+                for _, t in rest.iterrows():
+                    _render_one_prediction_card(t)
 
 
 def render_sport_tab(sport: str):
@@ -233,11 +242,11 @@ with tab_week:
 
     if week_tips:
         df = pd.DataFrame(week_tips)
-        cap = _max_single_odds()
-        within_cap = df[df["odds_decimal"] <= cap].copy()
+        lo, hi = _odds_range()
+        within_cap = df[(df["odds_decimal"] >= lo) & (df["odds_decimal"] <= hi)].copy()
         within_cap["is_line_handicap"] = within_cap["market"].isin(["spreads", "totals"])
         # Line/Handicap bumps a pick up, edge size breaks ties -- everything
-        # here is already within the odds cap, so no separate odds-range bonus needed.
+        # here is already within the odds range, so no separate odds bonus needed.
         within_cap["priority"] = within_cap["is_line_handicap"].astype(int) + within_cap["edge_pct"]
 
         big_value = within_cap[within_cap["edge_pct"] >= BIG_VALUE_EDGE_BAR].sort_values(
@@ -253,7 +262,7 @@ with tab_week:
 
         recommended = within_cap.sort_values("priority", ascending=False).head(RECOMMENDED_COUNT)
         st.subheader(f"Recommended bets this week ({len(recommended)})")
-        st.caption(f"All at {cap:g} odds or under, prioritising Line/Handicap — a short, curated list.")
+        st.caption(f"All within {lo:g}-{hi:g} odds, prioritising Line/Handicap — a short, curated list.")
         render_value_cards(recommended.to_dict("records"), show_sport_header=True, show_excluded=False)
 
         def _render_multi_combo(combo):
@@ -534,12 +543,26 @@ with tab_settings:
     min_edge = st.slider("Minimum edge to flag a tip", 0.0, 0.2, float(db.get_setting("min_edge_pct", str(DEFAULT_MIN_EDGE_PCT))), 0.005, format="%.1f%%")
 
     st.subheader("Odds range")
-    max_single_odds = st.number_input(
-        "Max odds shown as a normal recommendation (hard cap, not a soft discount)",
-        min_value=1.2, max_value=10.0,
-        value=float(db.get_setting("max_single_odds", str(DEFAULT_MAX_SINGLE_ODDS))), step=0.1,
+    c1, c2 = st.columns(2)
+    with c1:
+        min_single_odds = st.number_input(
+            "Min odds shown as a normal recommendation",
+            min_value=1.01, max_value=5.0,
+            value=float(db.get_setting("min_single_odds", str(DEFAULT_MIN_SINGLE_ODDS))), step=0.05,
+        )
+    with c2:
+        max_single_odds = st.number_input(
+            "Max odds shown as a normal recommendation",
+            min_value=1.2, max_value=10.0,
+            value=float(db.get_setting("max_single_odds", str(DEFAULT_MAX_SINGLE_ODDS))), step=0.1,
+        )
+    st.caption(
+        "Hard range, not a soft discount -- singles/Predictions outside it still get found and "
+        "stored (useful data, e.g. for Performance history, or as short-priced multi legs) but "
+        "are tucked into a collapsed 'not shown by default' section instead of the main feed. "
+        "Multis/SGM have no minimum leg odds -- a short leg below this range can still combine "
+        "into a sensible-priced multi."
     )
-    st.caption("Anything priced above this still gets found and stored, just tucked into a collapsed 'not shown by default' section instead of the main feed.")
 
     if st.button("Save settings"):
         db.set_setting("bankroll_amount", bankroll)
@@ -549,6 +572,7 @@ with tab_settings:
         db.set_setting("tier_units_lean", tier_lean)
         db.set_setting("max_units_per_bet", max_units)
         db.set_setting("min_edge_pct", min_edge)
+        db.set_setting("min_single_odds", min_single_odds)
         db.set_setting("max_single_odds", max_single_odds)
         st.success("Saved.")
 

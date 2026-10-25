@@ -14,6 +14,7 @@ from config import (
     DEFAULT_MAX_SINGLE_ODDS,
     DEFAULT_MAX_UNITS_PER_BET,
     DEFAULT_MIN_EDGE_PCT,
+    DEFAULT_MIN_SINGLE_ODDS,
     DEFAULT_TIER_UNITS_LEAN,
     DEFAULT_TIER_UNITS_MODERATE,
     DEFAULT_TIER_UNITS_STRONG,
@@ -41,6 +42,7 @@ def _load_staking_settings() -> dict:
         "max_units": _get_float_setting("max_units_per_bet", DEFAULT_MAX_UNITS_PER_BET),
         "min_edge_pct": _get_float_setting("min_edge_pct", DEFAULT_MIN_EDGE_PCT),
         "max_single_odds": _get_float_setting("max_single_odds", DEFAULT_MAX_SINGLE_ODDS),
+        "min_single_odds": _get_float_setting("min_single_odds", DEFAULT_MIN_SINGLE_ODDS),
         "tier_units": {
             "Strong": _get_float_setting("tier_units_strong", DEFAULT_TIER_UNITS_STRONG),
             "Moderate": _get_float_setting("tier_units_moderate", DEFAULT_TIER_UNITS_MODERATE),
@@ -299,7 +301,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 if not price_info:
                     continue
                 decimal_odds = price_info["price"]
-                if decimal_odds > settings["max_single_odds"]:
+                if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
                     continue
                 implied_prob = 1.0 / decimal_odds
                 if model_prob < implied_prob:
