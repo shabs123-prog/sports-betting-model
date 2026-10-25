@@ -110,6 +110,25 @@ confidence — a model can clear the bar on a dozen games in one slate, which
 isn't "a few bets a day" any more — the rest aren't dropped, just tucked
 into an expander.
 
+### Line Movement (`line_history` table, This Week tab)
+
+Catching a line before it moves (e.g. a total posted at 192.5 drifting to
+190.5 a few days later) is a different, legitimate technique from the
+devig/sharp-reference comparison everything else here uses -- and it needs
+genuine historical odds. The Odds API's historical endpoint does exactly
+this but is paid-tier only (confirmed by testing against this account's
+free key, not assumed: `HISTORICAL_UNAVAILABLE_ON_FREE_USAGE_PLAN`). Rather
+than pay for it or fake the signal, `run()` now records every outcome's
+fair probability (and point, for Line/Handicap) to `line_history` on every
+pipeline run, tip-worthy or not. `db.get_moved_lines()` finds any line with
+snapshots spanning 2+ distinct calendar days and reports first-seen vs
+latest. This is a cold start: empty for the first week or two after this
+shipped, by design -- there's no backfill, just forward accumulation.
+Verified the query logic works correctly by manually inserting a synthetic
+older snapshot and confirming it's picked up and rendered right (see git
+history around when this landed) -- the only thing actually missing right
+now is time for real data to accumulate.
+
 ### API quota
 
 Billing is `markets × regions`, and every call now requests `au,eu`

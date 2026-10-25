@@ -167,6 +167,7 @@ def run(sport: str = "nba", log=print) -> dict:
     log(f"[{sport}] {len(events)} upcoming games with odds.")
 
     value_tips, prediction_tips, knowledge_notes_logged = 0, 0, 0
+    line_history_rows = []  # every outcome's fair prob/point this run, for future line-movement detection
 
     for event in events:
         home_odds_name = event["home_team"]
@@ -235,6 +236,12 @@ def run(sport: str = "nba", log=print) -> dict:
                     fair_prob_source = "AU consensus"
                 if fair_prob is None:
                     continue
+
+                line_history_rows.append({
+                    "sport": sport, "matchup": matchup, "game_date": game_date,
+                    "market": market, "outcome": outcome_name, "point": point,
+                    "fair_prob": fair_prob, "fair_prob_source": fair_prob_source,
+                })
 
                 devig_edge_pct = edge.edge_pct(fair_prob, decimal_odds)
                 # Elo only predicts moneyline win probability -- it says nothing
@@ -351,9 +358,12 @@ def run(sport: str = "nba", log=print) -> dict:
             })
             knowledge_notes_logged += 1
 
+    db.insert_line_history_batch(line_history_rows)
+
     log(
         f"[{sport}] done: {value_tips} value tips, {prediction_tips} prediction tips, "
-        f"{knowledge_notes_logged} standalone knowledge notes."
+        f"{knowledge_notes_logged} standalone knowledge notes, {len(line_history_rows)} "
+        f"line snapshots recorded."
     )
     return {"value_tips": value_tips, "prediction_tips": prediction_tips, "knowledge_notes": knowledge_notes_logged}
 

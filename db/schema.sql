@@ -46,3 +46,25 @@ CREATE TABLE IF NOT EXISTS elo_ratings (
     last_updated TEXT NOT NULL,
     PRIMARY KEY (sport, team)
 );
+
+-- One row per (game, market, outcome) per pipeline run -- the consensus
+-- point/fair-probability as it stood at that moment, regardless of whether
+-- it was tip-worthy that day. Accumulating these over days/weeks is what
+-- lets a future run detect a line actually moving (e.g. a total posted at
+-- 192.5 drifting to 190.5), rather than just comparing prices at one
+-- instant. Empty for the first couple of weeks after this table existed --
+-- that's expected, not a bug, there's no history to show yet.
+CREATE TABLE IF NOT EXISTS line_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recorded_at TEXT NOT NULL,
+    sport TEXT NOT NULL,
+    matchup TEXT NOT NULL,
+    game_date TEXT NOT NULL,
+    market TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    point REAL,
+    fair_prob REAL NOT NULL,
+    fair_prob_source TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_line_history_line
+    ON line_history (sport, matchup, game_date, market, outcome);

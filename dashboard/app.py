@@ -236,6 +236,41 @@ with tab_week:
         "day-of. Line/Handicap markets especially can carry more value earlier in the week, "
         "before the line sharpens closer to kickoff."
     )
+
+    st.subheader("Line Movement")
+    st.caption(
+        "Every pipeline run records each line's fair probability (and point, for Line/Handicap) "
+        "so a genuine move — e.g. a total posted at 192.5 drifting to 190.5 — becomes visible "
+        "over time, not just a single snapshot. Needs a few days of history before anything "
+        "shows up here; empty at first means it just started tracking, not that it's broken."
+    )
+    today_str_lm = date.today().isoformat()
+    week_end_str_lm = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
+    moved_lines = db.get_moved_lines(today_str_lm, week_end_str_lm)
+    if not moved_lines:
+        st.info("No line has 2+ days of tracked history yet — check back in a few days.")
+    else:
+        def _movement_size(m):
+            first, latest = m["first"], m["latest"]
+            if first["point"] is not None and latest["point"] is not None:
+                return abs(latest["point"] - first["point"])
+            return abs(latest["fair_prob"] - first["fair_prob"])
+
+        for m in sorted(moved_lines, key=_movement_size, reverse=True)[:10]:
+            first, latest = m["first"], m["latest"]
+            with st.container(border=True):
+                st.markdown(f"**{m['sport'].upper()}: {m['matchup']}** · {m['game_date']}")
+                label = MARKET_LABEL.get(m["market"], m["market"])
+                if first["point"] is not None:
+                    st.markdown(f"{label} · {m['outcome']}: **{first['point']:g} → {latest['point']:g}**")
+                else:
+                    st.markdown(
+                        f"{label} · {m['outcome']}: fair probability "
+                        f"**{first['fair_prob']:.1%} → {latest['fair_prob']:.1%}**"
+                    )
+                st.caption(f"Tracked over {m['days_tracked']} day(s), {m['snapshot_count']} snapshot(s).")
+
+    st.divider()
     today_str = date.today().isoformat()
     week_end_str = (date.today() + timedelta(days=7)).isoformat()
     week_tips = db.get_tips_in_range(today_str, week_end_str, tip_type="value")

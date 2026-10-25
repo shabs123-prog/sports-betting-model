@@ -178,3 +178,67 @@ def save_elo_ratings(sport: str, ratings: dict):
             "ON CONFLICT(sport, team) DO UPDATE SET rating = excluded.rating, last_updated = excluded.last_updated",
             [(sport, team, rating, ts) for team, rating in ratings.items()],
         )
+
+
+def insert_line_history_batch(rows: list[dict]):
+    """rows: [{sport, matchup, game_date, market, outcome, point, fair_prob, fair_prob_source}, ...]"""
+    if not rows:
+        return
+    with get_conn() as conn:
+        ts = now_iso()
+        conn.executemany(
+            """INSERT INTO line_history
+               (recorded_at, sport, matchup, game_date, market, outcome, point, fair_prob, fair_prob_source)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            [
+                (ts, r["sport"], r["matchup"], r["game_date"], r["market"], r["outcome"],
+                 r.get("point"), r["fair_prob"], r["fair_prob_source"])
+                for r in rows
+            ],
+        )
+
+
+def get_line_history(sport: str, matchup: str, game_date: str, market: str, outcome: str):
+    """All recorded snapshots for one specific line, oldest first."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM line_history
+               WHERE sport=? AND matchup=? AND game_date=? AND market=? AND outcome=?
+               ORDER BY recorded_at ASC""",
+            (sport, matchup, game_date, market, outcome),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_moved_lines(min_game_date: str, max_game_date: str):
+    """
+    Every (sport, matchup, game_date, market, outcome) with line_history
+    rows spanning 2+ distinct calendar days, for games between the given
+    dates -- the earliest and latest snapshot of each. Empty until enough
+    days of history have accumulated; that's expected, not a bug.
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM line_history
+               WHERE game_date >= ? AND game_date <= ?
+               ORDER BY sport, matchup, game_date, market, outcome, recorded_at ASC""",
+            (min_game_date, max_game_date),
+        ).fetchall()
+    grouped: dict[tuple, list[dict]] = {}
+    for row in rows:
+        key = (row["sport"], row["matchup"], row["game_date"], row["market"], row["outcome"])
+        grouped.setdefault(key, []).append(dict(row))
+
+    moved = []
+    for key, snaps in grouped.items():
+        distinct_days = {s["recorded_at"][:10] for s in snaps}
+        if len(distinct_days) < 2:
+            continue
+        sport, matchup, game_date, market, outcome = key
+        moved.append({
+            "sport": sport, "matchup": matchup, "game_date": game_date,
+            "market": market, "outcome": outcome,
+            "first": snaps[0], "latest": snaps[-1], "snapshot_count": len(snaps),
+            "days_tracked": len(distinct_days),
+        })
+    return moved
