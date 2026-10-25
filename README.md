@@ -3,9 +3,19 @@
 A value-betting tool: pulls live odds across AU bookmakers, finds prices that
 disagree with the rest of the market, suggests a stake in units, and tracks
 your results. **NBA** (with Elo model context + ball-knowledge notes) and
-**EPL** (devig only, for now) both work end-to-end, across moneyline,
-spreads/handicap, and totals markets. NFL and Australian horse racing slot
-into the same pattern later (see "Extending to other sports" below).
+**EPL/NBL/NRL/AFL/BBL** (devig only, for now) work end-to-end, across
+moneyline, spreads/handicap, and totals markets. NFL and Australian horse
+racing slot into the same pattern later (see "Extending to other sports").
+
+**Only recommends bookmakers you can actually bet at.** `config.USER_BOOKMAKERS`
+restricts every tip's "best price" to accounts you hold — the fair-probability
+consensus still uses every AU bookmaker The Odds API returns (broader = more
+accurate), but it'll never tell you to bet somewhere you don't have an
+account. **Bet365 and Dabble do not appear in The Odds API's data at all**
+(confirmed by testing, not assumed) — this tool literally cannot price or
+recommend bets at either. Run `python -m scripts.list_bookmakers` any time to
+re-check which bookmakers are currently in the data and update the list in
+`config.py` if your accounts change.
 
 ## How it finds "value"
 
@@ -60,6 +70,20 @@ history to work from (currently only wired up for NBA via balldontlie — see
 deliberately simple in v1 — obvious next upgrades are wiring in an
 injury-news feed and a results source for EPL (football-data.org is the
 usual free option).
+
+## Bonus Converter (matched betting)
+
+A separate tab, unrelated to the value-tip pipeline: turns bonus/free bet
+money into cash. Back the bonus bet at the bookmaker offering it (e.g.
+Ladbrokes), lay the opposite outcome on an exchange (Betfair) at odds you
+enter by hand, and `models/matched_betting.py` works out the lay stake that
+equalizes both outcomes — so you end up with close to the same result either
+way instead of just betting the bonus outright and hoping. Handles both
+qualifying bets (your own money, typically a small cost to unlock the real
+bonus) and free/SNR bets (stake not returned, where you're extracting cash
+from the bonus itself — usually 60-80% of it depending on the odds and
+exchange commission). Pure math, no live odds pulled — you type in the two
+prices from your own apps.
 
 ## Setup
 

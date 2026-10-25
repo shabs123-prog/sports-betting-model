@@ -64,26 +64,37 @@ def consensus_points(event: dict, market_key: str) -> dict:
     }
 
 
-def best_price_per_outcome(event: dict, market_key: str = "h2h", outcome_points: dict | None = None) -> dict:
+def best_price_per_outcome(
+    event: dict,
+    market_key: str = "h2h",
+    outcome_points: dict | None = None,
+    allowed_bookmakers: set | None = None,
+) -> dict:
     """
     Given one event from fetch_odds(), return:
     {outcome_name: {"price": best_decimal_price, "bookmaker": title, "point": point}}
     scanning across every bookmaker returned for that region. If outcome_points
-    is given, only prices quoted at that exact point are considered.
+    is given, only prices quoted at that exact point are considered. If
+    allowed_bookmakers is given, only those bookmakers are considered -- use
+    this to restrict "best price" to accounts you actually hold, so every tip
+    is one you can actually place.
     """
     best: dict[str, dict] = {}
     for bm in event.get("bookmakers", []):
+        name = bm.get("title", bm.get("key"))
+        if allowed_bookmakers is not None and name not in allowed_bookmakers:
+            continue
         for market in bm.get("markets", []):
             if market.get("key") != market_key:
                 continue
             for outcome in market.get("outcomes", []):
-                name = outcome["name"]
+                oname = outcome["name"]
                 point = outcome.get("point")
-                if outcome_points is not None and outcome_points.get(name) != point:
+                if outcome_points is not None and outcome_points.get(oname) != point:
                     continue
                 price = outcome["price"]
-                if name not in best or price > best[name]["price"]:
-                    best[name] = {"price": price, "bookmaker": bm.get("title", bm.get("key")), "point": point}
+                if oname not in best or price > best[oname]["price"]:
+                    best[oname] = {"price": price, "bookmaker": name, "point": point}
     return best
 
 

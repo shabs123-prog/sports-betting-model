@@ -30,11 +30,22 @@ DEFAULT_KELLY_FRACTION = float(_get_secret("KELLY_FRACTION", "0.3"))
 DEFAULT_MAX_UNITS_PER_BET = float(_get_secret("MAX_UNITS_PER_BET", "3"))
 DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.005"))
 
-# Odds API region/bookmaker set -- 'au' returns AU-licensed bookmakers
-# (Sportsbet, TAB, Neds, Ladbrokes AU, Unibet, PointsBet AU, Betfair AU, etc.)
+# Odds API region -- 'au' returns AU-licensed bookmakers. As of testing,
+# that's: SportsBet, PointsBet (AU), TAB, TABtouch, Ladbrokes, Neds, Unibet,
+# Betfair, PlayUp, Betr, Bet Right, Picklebet (AU). Note: Bet365 and Dabble
+# do NOT appear in this API's data at all -- they're not available to price
+# or recommend through this tool, full stop.
 ODDS_API_REGION = "au"
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 BALLDONTLIE_BASE = "https://api.balldontlie.io/v1"
+
+# Bookmakers you actually hold accounts with. "Best price" recommendations
+# are restricted to this list so every tip is one you can actually place --
+# the fair-probability consensus still uses every AU bookmaker The Odds API
+# returns, since more books = a more accurate consensus. Must match the
+# "title" strings above exactly; run `python -m scripts.list_bookmakers` if
+# the API's naming ever changes.
+USER_BOOKMAKERS = {"SportsBet", "PointsBet (AU)", "TAB", "Ladbrokes", "Betfair"}
 
 # "has_history": True means we have a results data source (currently just
 # balldontlie, NBA-only) to train the Elo model and generate ball-knowledge

@@ -17,6 +17,7 @@ from config import (
     SPORT_CONFIG,
 )
 from db import database as db
+from models import matched_betting
 from models.risk import risk_label
 from tips.generate_tips import run as run_pipeline
 
@@ -29,8 +30,8 @@ st.caption(
     "You place every bet yourself. Bet within your means; this is not financial advice."
 )
 
-tab_tips, tab_knowledge, tab_run, tab_tracker, tab_perf, tab_settings = st.tabs(
-    ["Today's Tips", "Ball Knowledge", "Run Pipeline", "Bet Tracker", "Performance", "Settings"]
+tab_tips, tab_knowledge, tab_bonus, tab_run, tab_tracker, tab_perf, tab_settings = st.tabs(
+    ["Today's Tips", "Ball Knowledge", "Bonus Converter", "Run Pipeline", "Bet Tracker", "Performance", "Settings"]
 )
 
 # ---------------------------------------------------------------- Today's Tips
@@ -91,6 +92,66 @@ with tab_knowledge:
                         st.write(t["reasoning"])
     else:
         st.info("No situational notes for this date yet. Run the NBA pipeline from the 'Run Pipeline' tab.")
+
+# ---------------------------------------------------------------- Bonus Converter
+with tab_bonus:
+    st.caption(
+        "Turn bonus/free bet money into cash: back the bonus bet at your bookmaker (e.g. "
+        "Ladbrokes), then lay the opposite outcome on an exchange (Betfair) to lock in close "
+        "to the same result either way. You place both legs yourself — this just does the "
+        "lay-stake math. Numbers are entered by hand (not pulled from live odds)."
+    )
+
+    bet_kind = st.radio(
+        "Bet type",
+        ["Free / bonus bet (stake NOT returned)", "Qualifying bet (your own money, stake returned)"],
+        help="Most bookmakers make you place a qualifying bet with your own money first, "
+             "then release the bonus as a separate free bet you place afterwards.",
+    )
+    is_free_bet = bet_kind.startswith("Free")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        stake = st.number_input("Bonus / stake amount ($)", min_value=0.0, value=50.0, step=5.0)
+    with c2:
+        back_odds = st.number_input("Back odds (at your bookmaker, decimal)", min_value=1.01, value=4.0, step=0.05)
+    with c3:
+        lay_odds = st.number_input("Lay odds (on Betfair Exchange, decimal)", min_value=1.01, value=4.2, step=0.05)
+
+    commission = st.slider(
+        "Betfair commission (%) — check your current rate, it varies by account/promo",
+        0.0, 10.0, 5.0, 0.1,
+    ) / 100
+
+    if stake > 0 and lay_odds > commission:
+        fn = matched_betting.free_bet if is_free_bet else matched_betting.qualifying_bet
+        result = fn(stake, back_odds, lay_odds, commission)
+
+        st.subheader("Lay this much on Betfair")
+        st.metric("Lay stake", f"${result['lay_stake']:.2f}")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("If back bet wins", f"${result['profit_if_back_wins']:+.2f}")
+        c2.metric("If back bet loses", f"${result['profit_if_back_loses']:+.2f}")
+        c3.metric(
+            "Retained" if is_free_bet else "Cost to qualify",
+            f"{result['retention_pct']:+.1%}",
+        )
+
+        if is_free_bet:
+            # Streamlit renders markdown as LaTeX between a pair of "$" -- escape
+            # both or two dollar amounts in one caption get mangled into a math block.
+            st.caption(
+                f"Guaranteed outcome regardless of result: \\${result['worst_case_profit']:+.2f} "
+                f"cash from a \\${stake:.0f} bonus bet ({result['retention_pct']:.0%} retained)."
+            )
+        else:
+            st.caption(
+                f"This is the cost (or small gain) of meeting a qualifying-bet requirement with "
+                f"your own money — typically a small loss, which unlocks the real bonus separately."
+            )
+    else:
+        st.warning("Lay odds must be greater than the commission rate for this to be calculable.")
 
 # ---------------------------------------------------------------- Run Pipeline
 with tab_run:

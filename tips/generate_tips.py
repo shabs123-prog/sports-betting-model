@@ -15,6 +15,7 @@ from config import (
     DEFAULT_MIN_EDGE_PCT,
     DEFAULT_UNIT_SIZE_PCT,
     SPORT_CONFIG,
+    USER_BOOKMAKERS,
 )
 from data import balldontlie, odds_api
 from db import database as db
@@ -114,7 +115,12 @@ def run(sport: str = "nba", log=print) -> dict:
             if not books:
                 continue
             fair_probs = edge.consensus_fair_probs(books)
-            best_prices = odds_api.best_price_per_outcome(event, market, outcome_points)
+            # Fair probability uses every bookmaker (broader = more accurate
+            # consensus); the actual recommendation is restricted to accounts
+            # you hold, so every tip is one you can actually go place.
+            best_prices = odds_api.best_price_per_outcome(
+                event, market, outcome_points, allowed_bookmakers=USER_BOOKMAKERS
+            )
 
             for outcome_name, price_info in best_prices.items():
                 decimal_odds = price_info["price"]
