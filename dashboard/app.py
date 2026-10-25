@@ -90,8 +90,8 @@ with tab_tips:
 with tab_knowledge:
     st.caption(
         "Situational context, not priced edges: rest/schedule, form streaks, home/away splits. "
-        "Currently only wired up for NBA — other sports need their own results-history source "
-        "(see README) before they can get this."
+        "Wired up for NBA, EPL, NBL and AFL (ESPN results history) — NRL and BBL don't have a "
+        "results source yet, so no notes for those."
     )
     kn_date = st.date_input("Game date", value=date.today(), key="knowledge_date")
     knowledge_tips = db.get_tips_for_date(kn_date.isoformat(), tip_type="knowledge")
