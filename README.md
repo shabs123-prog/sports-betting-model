@@ -51,11 +51,15 @@ Every value tip gets two independent labels:
   how likely the pick is to actually win (favourite vs underdog), regardless
   of edge size.
 
-The dashboard groups Today's Tips by sport, then by risk — so you can see
-"safe anchors" vs "risky longshots" the way a tipping app typically lays it
-out. Stake sizing (`models/kelly.py`) uses fractional Kelly — default 30% of
-full Kelly — capped at **3 units max per bet**, so weaker edges naturally
-size down instead of being hidden entirely.
+Each sport tab groups bets by risk — so you can see "safe anchors" vs
+"risky longshots" the way a tipping app typically lays it out. Stake sizing
+is a fixed unit count per edge tier (Strong/Moderate/Lean → configurable
+units, default 2.5/1.75/1.0), capped by a hard max-units-per-bet setting —
+rounder, more intuitive numbers than a continuously-scaled Kelly fraction,
+while still scaling with how confident the edge is.
+`models/kelly.py`'s actual Kelly-criterion math still exists as a tested
+utility if you want to switch back to it, just isn't wired into the default
+pipeline.
 
 ## "Ball knowledge" tips (NBA, EPL, NBL, AFL)
 
@@ -139,8 +143,8 @@ your phone.
    manually), then mark it Win/Loss/Push once it settles.
 6. **Performance** — win rate, ROI, cumulative units over time, broken down
    by sport.
-7. **Settings** — bankroll, unit size, Kelly fraction, max units per bet
-   (default 3), minimum edge threshold to bother flagging a tip.
+7. **Settings** — bankroll, unit size, per-tier unit counts, max units per
+   bet (default 3), minimum edge threshold to bother flagging a tip.
 
 ## Extending to other sports
 

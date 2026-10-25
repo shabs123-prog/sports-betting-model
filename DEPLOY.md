@@ -37,9 +37,11 @@ it shows you, usually a browser sign-in.)
 ODDS_API_KEY = "<your key from .env>"
 BANKROLL_AMOUNT = "1000"
 UNIT_SIZE_PCT = "0.01"
-KELLY_FRACTION = "0.3"
 MAX_UNITS_PER_BET = "3"
-MIN_EDGE_PCT = "0.005"
+MIN_EDGE_PCT = "0.0075"
+TIER_UNITS_STRONG = "2.5"
+TIER_UNITS_MODERATE = "1.75"
+TIER_UNITS_LEAN = "1.0"
 ```
 
    Run `cat .env` locally to see your actual key values to copy in — this

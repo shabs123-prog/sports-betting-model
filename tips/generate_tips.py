@@ -9,18 +9,18 @@ see that file to add a new sport.
 from datetime import date
 
 from config import (
-    DEFAULT_BANKROLL_AMOUNT,
-    DEFAULT_KELLY_FRACTION,
     DEFAULT_MAX_UNITS_PER_BET,
     DEFAULT_MIN_EDGE_PCT,
-    DEFAULT_UNIT_SIZE_PCT,
+    DEFAULT_TIER_UNITS_LEAN,
+    DEFAULT_TIER_UNITS_MODERATE,
+    DEFAULT_TIER_UNITS_STRONG,
     SPORT_CONFIG,
     USER_BOOKMAKERS,
 )
 from data import espn, odds_api
 from db import database as db
 from knowledge import situational
-from models import edge, elo, kelly
+from models import edge, elo
 from models.risk import risk_label
 from models.team_names import build_nickname_index, resolve
 
@@ -32,12 +32,19 @@ def _get_float_setting(key: str, default: float) -> float:
 
 def _load_staking_settings() -> dict:
     return {
-        "bankroll": _get_float_setting("bankroll_amount", DEFAULT_BANKROLL_AMOUNT),
-        "unit_size_pct": _get_float_setting("unit_size_pct", DEFAULT_UNIT_SIZE_PCT),
-        "kelly_fraction": _get_float_setting("kelly_fraction", DEFAULT_KELLY_FRACTION),
         "max_units": _get_float_setting("max_units_per_bet", DEFAULT_MAX_UNITS_PER_BET),
         "min_edge_pct": _get_float_setting("min_edge_pct", DEFAULT_MIN_EDGE_PCT),
+        "tier_units": {
+            "Strong": _get_float_setting("tier_units_strong", DEFAULT_TIER_UNITS_STRONG),
+            "Moderate": _get_float_setting("tier_units_moderate", DEFAULT_TIER_UNITS_MODERATE),
+            "Lean": _get_float_setting("tier_units_lean", DEFAULT_TIER_UNITS_LEAN),
+        },
     }
+
+
+def _tier_units(tier: str, settings: dict) -> float:
+    base = settings["tier_units"].get(tier, settings["tier_units"]["Lean"])
+    return round(min(base, settings["max_units"]), 2)
 
 
 def _espn_season_years(sport: str) -> list[int]:
@@ -74,14 +81,19 @@ def _finished_games_for_elo(sport: str, cfg: dict) -> list:
 # "safe favourite" and "proper longshot") -- so when the market does offer
 # something here, it's worth surfacing even at a thinner edge than usual,
 # rather than letting it get crowded out by easier-to-find longshot edges.
+# Spreads/totals ("Line"/"Handicap") get the same discount even outside that
+# price band -- they're priced near-even by construction, so they're
+# structurally where 1.7-2.2 value actually lives; moneyline underdogs are
+# the ones that drift to longshot odds.
 PREFERRED_ODDS_RANGE = (1.7, 2.2)
-PREFERRED_RANGE_EDGE_DISCOUNT = 0.5  # accept half the usual min-edge in that range
+PREFERRED_MARKETS = {"spreads", "totals"}
+DISCOUNTED_EDGE_MULTIPLIER = 0.6  # accept 60% of the usual min-edge when either applies
 
 
-def _effective_min_edge(decimal_odds: float, base_threshold: float) -> float:
+def _effective_min_edge(decimal_odds: float, market: str, base_threshold: float) -> float:
     lo, hi = PREFERRED_ODDS_RANGE
-    if lo <= decimal_odds <= hi:
-        return base_threshold * PREFERRED_RANGE_EDGE_DISCOUNT
+    if market in PREFERRED_MARKETS or lo <= decimal_odds <= hi:
+        return base_threshold * DISCOUNTED_EDGE_MULTIPLIER
     return base_threshold
 
 
@@ -171,16 +183,9 @@ def run(sport: str = "nba", log=print) -> dict:
                 # disagreements with the market are almost always model noise,
                 # not real edge. It must NEVER be the thing that triggers a tip
                 # or sizes a stake -- that was a bug in an earlier version.
-                if devig_edge_pct >= _effective_min_edge(decimal_odds, settings["min_edge_pct"]):
-                    stake = kelly.suggested_stake(
-                        fair_prob,
-                        decimal_odds,
-                        settings["bankroll"],
-                        settings["unit_size_pct"],
-                        settings["kelly_fraction"],
-                        settings["max_units"],
-                    )
+                if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     tier = edge.tier_label(devig_edge_pct)
+                    units = _tier_units(tier, settings)
                     risk = risk_label(fair_prob)
                     reasoning_parts = [
                         f"[{tier} edge · {risk}] No-vig market-consensus probability: {fair_prob:.1%} vs "
@@ -209,7 +214,7 @@ def run(sport: str = "nba", log=print) -> dict:
                         "model_prob": model_prob,
                         "market_fair_prob": fair_prob,
                         "edge_pct": devig_edge_pct,
-                        "suggested_units": stake["units"],
+                        "suggested_units": units,
                         "tip_type": "value",
                         "reasoning": " ".join(reasoning_parts),
                     })

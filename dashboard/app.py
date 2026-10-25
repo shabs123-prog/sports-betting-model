@@ -10,9 +10,11 @@ import streamlit as st
 
 from config import (
     DEFAULT_BANKROLL_AMOUNT,
-    DEFAULT_KELLY_FRACTION,
     DEFAULT_MAX_UNITS_PER_BET,
     DEFAULT_MIN_EDGE_PCT,
+    DEFAULT_TIER_UNITS_LEAN,
+    DEFAULT_TIER_UNITS_MODERATE,
+    DEFAULT_TIER_UNITS_STRONG,
     DEFAULT_UNIT_SIZE_PCT,
     SPORT_CONFIG,
     USER_BOOKMAKERS,
@@ -162,6 +164,9 @@ tab_week, *sport_tabs, tab_horses, tab_bonus, tab_tracker, tab_perf, tab_setting
 )
 
 # ---------------------------------------------------------------- This Week
+RECOMMENDED_COUNT = 5  # roughly what a "3-4 bets a week" cadence looks like with some to pick from
+BIG_VALUE_EDGE_BAR = 0.03  # Strong-tier edge -- only flag as a special alert, not every week
+
 with tab_week:
     st.caption(
         "Best picks across every sport for the week ahead — value doesn't have to be bet "
@@ -175,19 +180,33 @@ with tab_week:
     if week_tips:
         df = pd.DataFrame(week_tips)
         df["odds_bucket"] = df["odds_decimal"].map(_odds_bucket)
-        standout = df[
-            (df["odds_bucket"] == "Preferred") & (df["market"].isin(["spreads", "totals"]))
-        ].sort_values("edge_pct", ascending=False).head(4)
+        df["is_line_handicap"] = df["market"].isin(["spreads", "totals"])
+        df["is_preferred_odds"] = df["odds_bucket"] == "Preferred"
+        # Composite score: Line/Handicap and 1.7-2.2 odds both bump a pick up,
+        # edge size breaks ties -- never an empty list just because nothing
+        # happens to match every criterion at once.
+        df["priority"] = (
+            df["is_line_handicap"].astype(int) * 2 + df["is_preferred_odds"].astype(int) + df["edge_pct"]
+        )
 
-        if not standout.empty:
-            st.subheader(f"Standout picks ({len(standout)})")
-            st.caption("Line/Handicap bets in the 1.7-2.2 range — a few picked out a week ahead, not just tonight's games.")
-            render_value_cards(standout.to_dict("records"), show_sport_header=True)
-            st.divider()
+        big_value = df[df["edge_pct"] >= BIG_VALUE_EDGE_BAR].sort_values("edge_pct", ascending=False).head(1)
+        if not big_value.empty:
+            bv = big_value.iloc[0]
+            st.success(
+                f"🔥 **Big value alert** — {bv['sport'].upper()}: {bv['matchup']} ({bv['game_date']}). "
+                f"{MARKET_LABEL.get(bv['market'], bv['market'])} · {bv['selection']} @ {bv['odds_decimal']} "
+                f"({bv['bookmaker']}) — {bv['edge_pct']:+.1%} edge, well above the usual bar."
+            )
 
-        st.subheader("Everything else this week")
-        rest = df.drop(standout.index) if not standout.empty else df
-        render_value_cards(rest.to_dict("records"), show_sport_header=True)
+        recommended = df.sort_values("priority", ascending=False).head(RECOMMENDED_COUNT)
+        st.subheader(f"Recommended bets this week ({len(recommended)})")
+        st.caption("Prioritises Line/Handicap and the 1.7-2.2 odds range — a short, curated list, not everything found.")
+        render_value_cards(recommended.to_dict("records"), show_sport_header=True)
+
+        rest = df.drop(recommended.index)
+        if not rest.empty:
+            with st.expander(f"Everything else this week ({len(rest)})"):
+                render_value_cards(rest.to_dict("records"), show_sport_header=True)
     else:
         st.info("No value tips for the week yet — refresh sports from their own tabs.")
 
@@ -394,17 +413,28 @@ with tab_perf:
 
 # ---------------------------------------------------------------- Settings
 with tab_settings:
-    st.subheader("Bankroll & staking")
+    st.subheader("Bankroll")
     bankroll = st.number_input("Bankroll ($)", min_value=0.0, value=float(db.get_setting("bankroll_amount", str(DEFAULT_BANKROLL_AMOUNT))), step=50.0)
     unit_pct = st.number_input("Unit size (% of bankroll)", min_value=0.1, max_value=10.0, value=float(db.get_setting("unit_size_pct", str(DEFAULT_UNIT_SIZE_PCT))) * 100, step=0.1) / 100
-    kelly_frac = st.slider("Kelly fraction (lower = more conservative)", 0.0, 1.0, float(db.get_setting("kelly_fraction", str(DEFAULT_KELLY_FRACTION))), 0.05)
-    max_units = st.number_input("Max units per bet", min_value=0.5, value=float(db.get_setting("max_units_per_bet", str(DEFAULT_MAX_UNITS_PER_BET))), step=0.5)
+
+    st.subheader("Stake size by edge tier")
+    st.caption("A fixed unit count per tier, not a continuously-scaled fraction — bigger edge, bigger round number.")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        tier_strong = st.number_input("Strong edge (≥3%)", min_value=0.25, value=float(db.get_setting("tier_units_strong", str(DEFAULT_TIER_UNITS_STRONG))), step=0.25)
+    with c2:
+        tier_moderate = st.number_input("Moderate edge (1.5-3%)", min_value=0.25, value=float(db.get_setting("tier_units_moderate", str(DEFAULT_TIER_UNITS_MODERATE))), step=0.25)
+    with c3:
+        tier_lean = st.number_input("Lean edge (below 1.5%)", min_value=0.25, value=float(db.get_setting("tier_units_lean", str(DEFAULT_TIER_UNITS_LEAN))), step=0.25)
+    max_units = st.number_input("Max units per bet (hard cap, overrides the above)", min_value=0.5, value=float(db.get_setting("max_units_per_bet", str(DEFAULT_MAX_UNITS_PER_BET))), step=0.5)
     min_edge = st.slider("Minimum edge to flag a tip", 0.0, 0.2, float(db.get_setting("min_edge_pct", str(DEFAULT_MIN_EDGE_PCT))), 0.005, format="%.1f%%")
 
     if st.button("Save settings"):
         db.set_setting("bankroll_amount", bankroll)
         db.set_setting("unit_size_pct", unit_pct)
-        db.set_setting("kelly_fraction", kelly_frac)
+        db.set_setting("tier_units_strong", tier_strong)
+        db.set_setting("tier_units_moderate", tier_moderate)
+        db.set_setting("tier_units_lean", tier_lean)
         db.set_setting("max_units_per_bet", max_units)
         db.set_setting("min_edge_pct", min_edge)
         st.success("Saved.")

@@ -41,9 +41,9 @@ def edge_pct(fair_prob: float, offered_decimal_odds: float) -> float:
     return fair_prob - (1.0 / offered_decimal_odds)
 
 
-# Tiering for display only -- stake size already does the real work of
-# treating a small edge as a small bet (via Kelly). This just labels what
-# the number means so a 0.6% edge doesn't read the same as a 4% one.
+# Tier drives both the label shown and the stake size (see
+# tips/generate_tips.TIER_UNITS) -- a bigger edge gets a bigger, rounder
+# unit size rather than a continuously-scaled fraction.
 EDGE_TIERS = [
     (0.03, "Strong"),
     (0.015, "Moderate"),

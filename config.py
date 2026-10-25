@@ -25,9 +25,16 @@ ODDS_API_KEY = _get_secret("ODDS_API_KEY", "")
 
 DEFAULT_BANKROLL_AMOUNT = float(_get_secret("BANKROLL_AMOUNT", "1000"))
 DEFAULT_UNIT_SIZE_PCT = float(_get_secret("UNIT_SIZE_PCT", "0.01"))
-DEFAULT_KELLY_FRACTION = float(_get_secret("KELLY_FRACTION", "0.3"))
 DEFAULT_MAX_UNITS_PER_BET = float(_get_secret("MAX_UNITS_PER_BET", "3"))
-DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.005"))
+DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.0075"))
+
+# Stake size by edge tier (see models.edge.tier_label) -- a round, fixed
+# unit count per tier rather than a continuously-scaled Kelly fraction.
+# Bigger and more intuitive than "0.39 units", still grounded in how
+# confident the edge is. Each is capped by max_units_per_bet regardless.
+DEFAULT_TIER_UNITS_STRONG = float(_get_secret("TIER_UNITS_STRONG", "2.5"))
+DEFAULT_TIER_UNITS_MODERATE = float(_get_secret("TIER_UNITS_MODERATE", "1.75"))
+DEFAULT_TIER_UNITS_LEAN = float(_get_secret("TIER_UNITS_LEAN", "1.0"))
 
 # Odds API region -- 'au' returns AU-licensed bookmakers. As of testing,
 # that's: SportsBet, PointsBet (AU), TAB, TABtouch, Ladbrokes, Neds, Unibet,
