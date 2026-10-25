@@ -32,16 +32,12 @@ st.caption(
     "You place every bet yourself. Bet within your means; this is not financial advice."
 )
 
-tab_tips, tab_knowledge, tab_bonus, tab_run, tab_tracker, tab_perf, tab_settings = st.tabs(
-    ["Today's Tips", "Ball Knowledge", "Bonus Converter", "Run Pipeline", "Bet Tracker", "Performance", "Settings"]
-)
-
-# ---------------------------------------------------------------- Today's Tips
 RISK_ORDER = ["Not Risky", "Neutral", "Risky"]
 RISK_COLOR = {"Not Risky": "green", "Neutral": "orange", "Risky": "red"}
 MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line"}
 ODDS_BUCKET_ORDER = ["Preferred", "Other", "Longshot"]
 MAX_LONGSHOTS_PER_SPORT = 3
+WEEK_AHEAD_DAYS = 14  # how far out each sport tab looks -- value isn't just day-of
 
 
 def _odds_bucket(odds: float) -> str:
@@ -51,86 +47,165 @@ def _odds_bucket(odds: float) -> str:
         return "Longshot"
     return "Other"
 
-with tab_tips:
-    auto_sports = [s for s, cfg in SPORT_CONFIG.items() if cfg.get("auto_refresh")]
-    already_checked_today = all(
-        db.get_setting(f"last_run_date_{s}") == date.today().isoformat() for s in auto_sports
-    )
-    if not already_checked_today:
-        with st.spinner(
-            "First check today — refreshing " + ", ".join(s.upper() for s in auto_sports) +
-            ". This can take a minute or two (one-off per day); it'll be instant after this."
-        ):
-            for s in auto_sports:
-                ensure_fresh(s, log=lambda *_a, **_k: None)
-        st.rerun()
 
-    selected_date = st.date_input("Game date", value=date.today())
-    date_str = selected_date.isoformat()
+def render_value_cards(tips: list, show_sport_header: bool = False):
+    """Card feed for a list of value-tip rows. Caps longshots per sport so a
+    handful of big-priced outliers don't flood the view; sorts 1.7-2.2 odds
+    first within each sport, safest risk first."""
+    if not tips:
+        st.info("No value bets for this view right now.")
+        return
 
-    value_tips = db.get_tips_for_date(date_str, tip_type="value")
+    df = pd.DataFrame(tips)
+    df["risk"] = df["market_fair_prob"].map(risk_label)
+    df["risk_rank"] = df["risk"].map(RISK_ORDER.index)
+    df["market_label"] = df["market"].map(lambda m: MARKET_LABEL.get(m, m))
+    df["odds_bucket"] = df["odds_decimal"].map(_odds_bucket)
+    df["odds_bucket_rank"] = df["odds_bucket"].map(ODDS_BUCKET_ORDER.index)
 
-    if value_tips:
-        df = pd.DataFrame(value_tips)
-        df["risk"] = df["market_fair_prob"].map(risk_label)
-        df["risk_rank"] = df["risk"].map(RISK_ORDER.index)
-        df["market_label"] = df["market"].map(lambda m: MARKET_LABEL.get(m, m))
-        df["odds_bucket"] = df["odds_decimal"].map(_odds_bucket)
-        df["odds_bucket_rank"] = df["odds_bucket"].map(ODDS_BUCKET_ORDER.index)
-
-        for sport in sorted(df["sport"].unique()):
-            sport_df = df[df["sport"] == sport]
-            longshots = sport_df[sport_df["odds_bucket"] == "Longshot"].sort_values("edge_pct", ascending=False)
-            shown = pd.concat([sport_df[sport_df["odds_bucket"] != "Longshot"], longshots.head(MAX_LONGSHOTS_PER_SPORT)])
-            shown = shown.sort_values(
-                ["odds_bucket_rank", "risk_rank", "edge_pct"], ascending=[True, True, False]
-            )
-            hidden = len(longshots) - min(len(longshots), MAX_LONGSHOTS_PER_SPORT)
-
-            st.subheader(sport.upper())
-            for _, t in shown.iterrows():
-                with st.container(border=True):
-                    st.markdown(f"**{t['matchup']}**")
-                    st.markdown(
-                        f"**{t['market_label']}** · {t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}"
-                    )
-                    c1, c2 = st.columns([1, 2])
-                    c1.metric("Units", f"{t['suggested_units']:g}")
-                    color = RISK_COLOR.get(t["risk"], "gray")
-                    c2.markdown(f":{color}[**{t['risk']}**] · {t['edge_pct']:+.1%} edge")
-                    st.caption(t["reasoning"])
-            if hidden > 0:
-                st.caption(f"+ {hidden} more longshot(s) (3.0+ odds) not shown, to keep the feed from being all underdogs.")
-        st.caption(
-            "Sorted odds 1.7-2.2 first, then other prices, with longshots (3.0+) capped and pushed "
-            "last — within each, safest risk first. Units already scale down for weaker edges via Kelly."
+    sports = sorted(df["sport"].unique()) if show_sport_header else [None]
+    for sport in sports:
+        sport_df = df if sport is None else df[df["sport"] == sport]
+        if sport_df.empty:
+            continue
+        longshots = sport_df[sport_df["odds_bucket"] == "Longshot"].sort_values("edge_pct", ascending=False)
+        shown = pd.concat([sport_df[sport_df["odds_bucket"] != "Longshot"], longshots.head(MAX_LONGSHOTS_PER_SPORT)])
+        shown = shown.sort_values(
+            ["odds_bucket_rank", "risk_rank", "edge_pct"], ascending=[True, True, False]
         )
-    else:
-        st.info(
-            "No value tips for this date. NBA/EPL auto-refresh daily — try again shortly, or "
-            "check another sport from the 'Run Pipeline' tab."
-        )
+        hidden = len(longshots) - min(len(longshots), MAX_LONGSHOTS_PER_SPORT)
 
-# ---------------------------------------------------------------- Ball Knowledge
-with tab_knowledge:
+        if sport is not None:
+            st.markdown(f"#### {sport.upper()}")
+        for _, t in shown.iterrows():
+            with st.container(border=True):
+                st.markdown(f"**{t['matchup']}** · {t['game_date']}")
+                st.markdown(
+                    f"**{t['market_label']}** · {t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}"
+                )
+                c1, c2 = st.columns([1, 2])
+                c1.metric("Units", f"{t['suggested_units']:g}")
+                color = RISK_COLOR.get(t["risk"], "gray")
+                c2.markdown(f":{color}[**{t['risk']}**] · {t['edge_pct']:+.1%} edge")
+                st.caption(t["reasoning"])
+        if hidden > 0:
+            st.caption(f"+ {hidden} more longshot(s) (3.0+ odds) not shown here.")
+
+
+def render_knowledge_cards(tips: list, show_sport_header: bool = False):
+    """Ball-knowledge cards -- description only, deliberately no odds/units
+    since this is situational context, not a priced bet."""
+    if not tips:
+        st.caption("No situational notes for this view right now.")
+        return
+    sports = sorted({t["sport"] for t in tips}) if show_sport_header else [None]
+    for sport in sports:
+        if sport is not None:
+            st.markdown(f"#### {sport.upper()}")
+        for t in tips:
+            if sport is not None and t["sport"] != sport:
+                continue
+            with st.container(border=True):
+                st.markdown(f"**{t['matchup']}** · {t['game_date']}")
+                st.write(t["reasoning"])
+
+
+def render_sport_tab(sport: str):
+    cfg = SPORT_CONFIG[sport]
+    _, refresh_col = st.columns([4, 1])
+    with refresh_col:
+        if st.button("Refresh", key=f"refresh_{sport}"):
+            with st.spinner(f"Refreshing {sport.upper()}..."):
+                result = run_pipeline(sport=sport, log=lambda *_a, **_k: None)
+                db.set_setting(f"last_run_date_{sport}", date.today().isoformat())
+            st.success(f"{result['value_tips']} value tips, {result['knowledge_notes']} knowledge notes.")
+            st.rerun()
+
+    if not cfg["has_history"]:
+        st.caption("No results-history source wired up for this sport yet — devig value bets only, no Elo context or ball-knowledge notes.")
+    if not cfg.get("auto_refresh"):
+        st.caption("Not auto-refreshed daily (off-season or markets not posted yet) — use Refresh above to check manually.")
+
+    today_str = date.today().isoformat()
+    end_str = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
+
+    st.subheader("Value Bets")
+    value_tips = db.get_tips_in_range(today_str, end_str, tip_type="value", sport=sport)
+    render_value_cards(value_tips)
+
+    if cfg["has_history"]:
+        st.divider()
+        st.subheader("Ball Knowledge")
+        knowledge_tips = db.get_tips_in_range(today_str, end_str, tip_type="knowledge", sport=sport)
+        render_knowledge_cards(knowledge_tips)
+
+
+# ---------------------------------------------------------------- Daily auto-refresh
+# Streamlit renders every tab's body on each script run (only the active one is
+# shown), so this check runs once up front regardless of which tab is open.
+auto_sports = [s for s, cfg in SPORT_CONFIG.items() if cfg.get("auto_refresh")]
+already_checked_today = all(
+    db.get_setting(f"last_run_date_{s}") == date.today().isoformat() for s in auto_sports
+)
+if not already_checked_today:
+    with st.spinner(
+        "First check today — refreshing " + ", ".join(s.upper() for s in auto_sports) +
+        ". This can take under a minute (one-off per day); instant after this."
+    ):
+        for s in auto_sports:
+            ensure_fresh(s, log=lambda *_a, **_k: None)
+    st.rerun()
+
+sport_tab_names = list(SPORT_CONFIG.keys())
+tab_week, *sport_tabs, tab_horses, tab_bonus, tab_tracker, tab_perf, tab_settings = st.tabs(
+    ["This Week"] + [s.upper() for s in sport_tab_names] + ["Horses", "Bonus Converter", "Bet Tracker", "Performance", "Settings"]
+)
+
+# ---------------------------------------------------------------- This Week
+with tab_week:
     st.caption(
-        "Situational context, not priced edges: rest/schedule, form streaks, home/away splits. "
-        "Wired up for NBA, EPL, NBL and AFL (ESPN results history) — NRL and BBL don't have a "
-        "results source yet, so no notes for those."
+        "Best picks across every sport for the week ahead — value doesn't have to be bet "
+        "day-of. Line/Handicap markets especially can carry more value earlier in the week, "
+        "before the line sharpens closer to kickoff."
     )
-    kn_date = st.date_input("Game date", value=date.today(), key="knowledge_date")
-    knowledge_tips = db.get_tips_for_date(kn_date.isoformat(), tip_type="knowledge")
+    today_str = date.today().isoformat()
+    week_end_str = (date.today() + timedelta(days=7)).isoformat()
+    week_tips = db.get_tips_in_range(today_str, week_end_str, tip_type="value")
 
-    if knowledge_tips:
-        for sport in sorted({t["sport"] for t in knowledge_tips}):
-            st.subheader(sport.upper())
-            for t in knowledge_tips:
-                if t["sport"] == sport:
-                    with st.container(border=True):
-                        st.markdown(f"**{t['matchup']}**")
-                        st.write(t["reasoning"])
+    if week_tips:
+        df = pd.DataFrame(week_tips)
+        df["odds_bucket"] = df["odds_decimal"].map(_odds_bucket)
+        standout = df[
+            (df["odds_bucket"] == "Preferred") & (df["market"].isin(["spreads", "totals"]))
+        ].sort_values("edge_pct", ascending=False).head(4)
+
+        if not standout.empty:
+            st.subheader(f"Standout picks ({len(standout)})")
+            st.caption("Line/Handicap bets in the 1.7-2.2 range — a few picked out a week ahead, not just tonight's games.")
+            render_value_cards(standout.to_dict("records"), show_sport_header=True)
+            st.divider()
+
+        st.subheader("Everything else this week")
+        rest = df.drop(standout.index) if not standout.empty else df
+        render_value_cards(rest.to_dict("records"), show_sport_header=True)
     else:
-        st.info("No situational notes for this date yet. Run the NBA pipeline from the 'Run Pipeline' tab.")
+        st.info("No value tips for the week yet — refresh sports from their own tabs.")
+
+# ---------------------------------------------------------------- Per-sport tabs
+for sport, tab in zip(sport_tab_names, sport_tabs):
+    with tab:
+        render_sport_tab(sport)
+
+# ---------------------------------------------------------------- Horses
+with tab_horses:
+    st.caption(
+        "Not wired up to live data yet. Horse racing needs a different data source "
+        "(Betfair Exchange or Racing Australia, not The Odds API) and a different model — "
+        "per-runner form/speed-figure probability, not team-vs-team Elo. Once that's built, "
+        "notes here will look like Ball Knowledge: a description of the situation, no odds "
+        "or unit size, since that needs real per-runner pricing this tool doesn't have yet."
+    )
+    st.info("No horse racing notes yet. Say the word if you want this built next.")
 
 # ---------------------------------------------------------------- Bonus Converter
 with tab_bonus:
@@ -218,31 +293,6 @@ with tab_bonus:
                             f"Lay @ {opp['lay_odds']} (Betfair)"
                         )
                         _show_result(opp, stake, is_free_bet)
-
-# ---------------------------------------------------------------- Run Pipeline
-with tab_run:
-    st.write(
-        "NBA and EPL refresh automatically (once a day) when you open Today's Tips — "
-        "you shouldn't need this tab for those day-to-day. Use it to force a fresh pull "
-        "mid-day (odds move), or to manually check a sport that isn't auto-refreshed yet "
-        "(NBL/NRL/AFL/BBL — off-season right now)."
-    )
-    sport = st.selectbox("Sport", list(SPORT_CONFIG.keys()), index=0,
-                          format_func=lambda s: s.upper())
-    if st.button("Run pipeline now", type="primary"):
-        log_box = st.empty()
-        logs = []
-
-        def log(msg):
-            logs.append(msg)
-            log_box.code("\n".join(logs))
-
-        try:
-            result = run_pipeline(sport=sport, log=log)
-            db.set_setting(f"last_run_date_{sport}", date.today().isoformat())
-            st.success(f"Done — {result['value_tips']} value tips, {result['knowledge_notes']} knowledge notes.")
-        except Exception as e:
-            st.error(f"Pipeline failed: {e}")
 
 # ---------------------------------------------------------------- Bet Tracker
 with tab_tracker:

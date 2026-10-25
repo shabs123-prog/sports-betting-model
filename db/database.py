@@ -69,6 +69,21 @@ def get_tips_for_date(game_date: str, tip_type: str | None = None):
         return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
+def get_tips_in_range(start_date: str, end_date: str, tip_type: str | None = None, sport: str | None = None):
+    """Inclusive date range, e.g. for a 'this week' view spanning several game dates."""
+    query = "SELECT * FROM tips WHERE game_date >= ? AND game_date <= ?"
+    params = [start_date, end_date]
+    if tip_type:
+        query += " AND tip_type = ?"
+        params.append(tip_type)
+    if sport:
+        query += " AND sport = ?"
+        params.append(sport)
+    query += " ORDER BY game_date ASC, edge_pct DESC"
+    with get_conn() as conn:
+        return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
 def get_all_tips(limit: int = 500):
     with get_conn() as conn:
         rows = conn.execute(

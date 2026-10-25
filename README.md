@@ -111,9 +111,9 @@ Then run the dashboard:
 streamlit run dashboard/app.py
 ```
 
-Open http://localhost:8501, go to **Run Pipeline**, pick a sport, and run
-it. Run it once a day per sport (morning is fine — odds move continuously,
-but most of the move happens close to kickoff/tip-off).
+Open http://localhost:8501 — NBA/EPL/NFL refresh themselves automatically
+(once a day, on first load). For other sports, open that sport's tab and hit
+**Refresh**.
 
 To run it without the dashboard (e.g. for a cron job):
 
@@ -127,15 +127,19 @@ your phone.
 
 ## Using it day to day
 
-1. **Today's Tips** — grouped by sport, then by risk (Not Risky / Neutral /
-   Risky). Each tip shows pick, bookmaker, price, edge, suggested units, and
-   a reasoning string with the edge tier + risk label. Ball-knowledge notes
-   (NBA) listed separately below.
-2. **Bet Tracker** — log what you actually bet (can link to a tip or enter
+1. **This Week** — best picks across every sport for the next 7 days, not
+   just today/tonight — a few "standout" Line/Handicap picks in the 1.7-2.2
+   range pulled out up top, everything else below.
+2. **One tab per sport** (NBA, EPL, NBL, NFL, NRL, AFL, BBL) — that sport's
+   Value Bets (pick, bookmaker, price, edge, units, risk) and Ball Knowledge
+   notes together, looking ~2 weeks ahead, with a manual Refresh button.
+3. **Horses** — placeholder for now, see "Extending to other sports."
+4. **Bonus Converter** — see above.
+5. **Bet Tracker** — log what you actually bet (can link to a tip or enter
    manually), then mark it Win/Loss/Push once it settles.
-3. **Performance** — win rate, ROI, cumulative units over time, broken down
+6. **Performance** — win rate, ROI, cumulative units over time, broken down
    by sport.
-4. **Settings** — bankroll, unit size, Kelly fraction, max units per bet
+7. **Settings** — bankroll, unit size, Kelly fraction, max units per bet
    (default 3), minimum edge threshold to bother flagging a tip.
 
 ## Extending to other sports
