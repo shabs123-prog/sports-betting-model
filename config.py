@@ -113,10 +113,18 @@ SPORT_CONFIG = {
         "espn_sport": "basketball",
         "espn_league": "nbl",
         "markets": ["h2h", "spreads", "totals"],
-        # Games are being played (Elo trains fine, 240 games) but AU
-        # bookmakers aren't posting betting markets on it yet as of testing
-        # -- flip this once `python -m scripts.run_daily nbl` returns events.
-        "auto_refresh": False,
+        # 2026-10-26 check: season is live (games scheduled from Oct 28,
+        # Elo trains fine off 240 played games) but The Odds API's
+        # basketball_nbl returns 0 events across every region (au/us/uk/eu),
+        # and is flagged inactive on its own /sports listing -- no bookmaker
+        # coverage configured for this competition on this data source right
+        # now. Not simply early/no-lines-yet: Euroleague games a similar ~1
+        # day out already carry 24-25 bookmakers each, for comparison. A
+        # zero-event request doesn't cost API quota, so auto_refresh is on
+        # (checked daily, free) to pick it up the moment coverage appears --
+        # this doesn't mean coverage is expected soon, just that this will
+        # keep catching it automatically rather than relying on manual checks.
+        "auto_refresh": True,
     },
     "nfl": {
         "odds_key": "americanfootball_nfl",
