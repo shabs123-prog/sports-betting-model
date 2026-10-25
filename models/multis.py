@@ -38,6 +38,13 @@ MAX_LEG_ODDS = 2.2  # matches the single-bet ceiling -- no longshot legs
 MAX_COMBINED_ODDS = 2.2  # the COMBINED price, same ceiling as a single bet
 
 
+# Flat, conservative stakes -- a multi only pays if every leg lands, so even
+# a mathematically solid cross-game multi gets a smaller suggested unit than
+# a single; an SGM (approximate, correlated legs) gets smaller again.
+MULTI_UNITS = 0.5
+SGM_UNITS = 0.25
+
+
 def _combo_result(bookmaker: str, combo: tuple[dict, ...], approximate: bool) -> dict | None:
     combined_odds = 1.0
     combined_prob = 1.0
@@ -55,6 +62,7 @@ def _combo_result(bookmaker: str, combo: tuple[dict, ...], approximate: bool) ->
         "combined_edge_pct": combined_prob * combined_odds - 1.0,
         "implied_hit_pct": combined_prob,
         "approximate": approximate,
+        "suggested_units": SGM_UNITS if approximate else MULTI_UNITS,
     }
 
 

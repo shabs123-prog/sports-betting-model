@@ -88,7 +88,9 @@ technically +EV, not a sensible recommendation.
 
 Because both caps are strict, some days turn up very few or zero
 multis/SGMs — that's the caps working as intended, not a bug to loosen
-without asking.
+without asking. Each combo gets a flat, conservative suggested stake too
+(`MULTI_UNITS` 0.5, `SGM_UNITS` 0.25 — smaller than a single since it only
+pays if every leg lands, smaller again for the correlated/approximate SGMs).
 
 ### Predictions (`tip_type="prediction"`)
 
@@ -173,8 +175,11 @@ results, so back-to-back/rest-day detection uses the right calendar day too.
 edge. From schedule + results alone it flags things a sharp bettor would
 notice by hand: back-to-backs, rest advantages, win/loss streaks, and teams
 that are unusually bad at home or strong on the road. These get attached as
-extra reasoning on value tips, and also show up on their own as a daily
-"things to know" feed even when nothing is mispriced. Needs a results-history
+extra reasoning on Value/Prediction tips, **and** always get their own
+standalone Ball Knowledge card too -- an earlier version skipped the
+standalone card whenever the game already had a priced tip, which made the
+tab look far sparser than the actual situational-note coverage really was.
+Needs a results-history
 source to work from -- `data/espn.py` (ESPN's public site API, no key
 needed) covers NBA/EPL/NBL/AFL (see `config.SPORT_CONFIG`'s `has_history`
 flag). NRL isn't on ESPN's public API (checked, 404s); cricket uses a

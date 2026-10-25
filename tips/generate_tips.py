@@ -187,7 +187,6 @@ def run(sport: str = "nba", log=print) -> dict:
             game_date_obj = date.fromisoformat(game_date)
             notes = situational.generate_notes(home_team, away_team, game_date_obj, team_logs)
 
-        game_had_value = False
         h2h_best_prices, h2h_value_outcomes = {}, set()
         for market in cfg["markets"]:
             # Point consensus and the "AU consensus" fair prob both stay
@@ -292,7 +291,6 @@ def run(sport: str = "nba", log=print) -> dict:
                         "reasoning": " ".join(reasoning_parts),
                     })
                     value_tips += 1
-                    game_had_value = True
                     if market == "h2h":
                         h2h_value_outcomes.add(outcome_name)
 
@@ -338,9 +336,15 @@ def run(sport: str = "nba", log=print) -> dict:
                     "reasoning": " ".join(reasoning_parts),
                 })
                 prediction_tips += 1
-                game_had_value = True  # a prediction still counts as "something to show" for this game
 
-        if notes and not game_had_value:
+        # Always log situational notes as their own Ball Knowledge entry, even
+        # when this game also produced a Value/Prediction tip (whose reasoning
+        # already includes the same notes) -- Ball Knowledge is meant to be a
+        # complete feed of context, not just the leftover games that didn't
+        # get a priced pick. An earlier version skipped this whenever
+        # game_had_value was True, which made the tab look far sparser than
+        # the actual situational-note coverage really was.
+        if notes:
             db.insert_tip({
                 "game_date": game_date,
                 "sport": sport,

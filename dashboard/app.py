@@ -292,7 +292,8 @@ with tab_week:
             st.success(
                 f"🔥 **Big value alert** — {bv['sport'].upper()}: {bv['matchup']} ({bv['game_date']}). "
                 f"{MARKET_LABEL.get(bv['market'], bv['market'])} · {bv['selection']} @ {bv['odds_decimal']} "
-                f"({bv['bookmaker']}) — {bv['edge_pct']:+.1%} edge, well above the usual bar."
+                f"({bv['bookmaker']}) · {bv['suggested_units']:g}u — {bv['edge_pct']:+.1%} edge, "
+                f"well above the usual bar."
             )
 
         recommended = within_cap.sort_values("priority", ascending=False).head(RECOMMENDED_COUNT)
@@ -313,9 +314,10 @@ with tab_week:
                         f"{MARKET_LABEL.get(leg['market'], leg['market'])} {leg['selection']} "
                         f"@ {leg['odds_decimal']}"
                     )
-                c1, c2 = st.columns(2)
-                c1.metric("Combined edge", f"{combo['combined_edge_pct']:+.1%}")
-                c2.metric("Chance all legs hit", f"{combo['implied_hit_pct']:.1%}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Units", f"{combo['suggested_units']:g}")
+                c2.metric("Combined edge", f"{combo['combined_edge_pct']:+.1%}")
+                c3.metric("Chance all legs hit", f"{combo['implied_hit_pct']:.1%}")
 
         def _render_combo_group(combos):
             if not combos:
