@@ -36,6 +36,13 @@ DEFAULT_TIER_UNITS_STRONG = float(_get_secret("TIER_UNITS_STRONG", "2.5"))
 DEFAULT_TIER_UNITS_MODERATE = float(_get_secret("TIER_UNITS_MODERATE", "1.75"))
 DEFAULT_TIER_UNITS_LEAN = float(_get_secret("TIER_UNITS_LEAN", "1.0"))
 
+# Hard ceiling on single-bet odds shown in the main "Value Bets" views --
+# not a soft discount zone, an actual cutoff. Tips above this still get
+# generated and stored (useful data, e.g. for Performance history), they
+# just don't show in the default feed. Anything found above this is tucked
+# into a collapsed, clearly-labelled section instead.
+DEFAULT_MAX_SINGLE_ODDS = float(_get_secret("MAX_SINGLE_ODDS", "2.2"))
+
 # Odds API regions -- 'au' is the AU-licensed bookmakers you can actually bet
 # at. 'eu' is added to also pull Pinnacle -- a sharp, low-margin reference
 # book used industry-wide as a "true odds" benchmark, precisely because

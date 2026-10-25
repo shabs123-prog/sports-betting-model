@@ -10,6 +10,7 @@ import streamlit as st
 
 from config import (
     DEFAULT_BANKROLL_AMOUNT,
+    DEFAULT_MAX_SINGLE_ODDS,
     DEFAULT_MAX_UNITS_PER_BET,
     DEFAULT_MIN_EDGE_PCT,
     DEFAULT_TIER_UNITS_LEAN,
@@ -37,23 +38,34 @@ st.caption(
 RISK_ORDER = ["Not Risky", "Neutral", "Risky"]
 RISK_COLOR = {"Not Risky": "green", "Neutral": "orange", "Risky": "red"}
 MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line"}
-ODDS_BUCKET_ORDER = ["Preferred", "Other", "Longshot"]
-MAX_LONGSHOTS_PER_SPORT = 3
 WEEK_AHEAD_DAYS = 14  # how far out each sport tab looks -- value isn't just day-of
 
 
-def _odds_bucket(odds: float) -> str:
-    if 1.7 <= odds <= 2.2:
-        return "Preferred"
-    if odds >= 3.0:
-        return "Longshot"
-    return "Other"
+def _max_single_odds() -> float:
+    return float(db.get_setting("max_single_odds", str(DEFAULT_MAX_SINGLE_ODDS)))
 
 
-def render_value_cards(tips: list, show_sport_header: bool = False):
-    """Card feed for a list of value-tip rows. Caps longshots per sport so a
-    handful of big-priced outliers don't flood the view; sorts 1.7-2.2 odds
-    first within each sport, safest risk first."""
+def _render_one_tip_card(t):
+    with st.container(border=True):
+        st.markdown(f"**{t['matchup']}** · {t['game_date']}")
+        st.markdown(
+            f"**{t['market_label']}** · {t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}"
+        )
+        c1, c2 = st.columns([1, 2])
+        c1.metric("Units", f"{t['suggested_units']:g}")
+        color = RISK_COLOR.get(t["risk"], "gray")
+        c2.markdown(f":{color}[**{t['risk']}**] · {t['edge_pct']:+.1%} edge")
+        st.caption(t["reasoning"])
+
+
+def render_value_cards(tips: list, show_sport_header: bool = False, show_excluded: bool = True):
+    """
+    Card feed for value-tip rows, hard-capped at max_single_odds (Settings,
+    default 2.2) -- not a soft discount zone, an actual ceiling. Anything
+    priced above that still gets generated/stored (useful data -- e.g. for
+    Performance history) but is tucked into a collapsed expander here
+    instead of shown as a normal recommendation.
+    """
     if not tips:
         st.info("No value bets for this view right now.")
         return
@@ -62,36 +74,29 @@ def render_value_cards(tips: list, show_sport_header: bool = False):
     df["risk"] = df["market_fair_prob"].map(risk_label)
     df["risk_rank"] = df["risk"].map(RISK_ORDER.index)
     df["market_label"] = df["market"].map(lambda m: MARKET_LABEL.get(m, m))
-    df["odds_bucket"] = df["odds_decimal"].map(_odds_bucket)
-    df["odds_bucket_rank"] = df["odds_bucket"].map(ODDS_BUCKET_ORDER.index)
 
-    sports = sorted(df["sport"].unique()) if show_sport_header else [None]
-    for sport in sports:
-        sport_df = df if sport is None else df[df["sport"] == sport]
-        if sport_df.empty:
-            continue
-        longshots = sport_df[sport_df["odds_bucket"] == "Longshot"].sort_values("edge_pct", ascending=False)
-        shown = pd.concat([sport_df[sport_df["odds_bucket"] != "Longshot"], longshots.head(MAX_LONGSHOTS_PER_SPORT)])
-        shown = shown.sort_values(
-            ["odds_bucket_rank", "risk_rank", "edge_pct"], ascending=[True, True, False]
-        )
-        hidden = len(longshots) - min(len(longshots), MAX_LONGSHOTS_PER_SPORT)
+    cap = _max_single_odds()
+    within_cap = df[df["odds_decimal"] <= cap]
+    above_cap = df[df["odds_decimal"] > cap]
 
-        if sport is not None:
-            st.markdown(f"#### {sport.upper()}")
-        for _, t in shown.iterrows():
-            with st.container(border=True):
-                st.markdown(f"**{t['matchup']}** · {t['game_date']}")
-                st.markdown(
-                    f"**{t['market_label']}** · {t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}"
-                )
-                c1, c2 = st.columns([1, 2])
-                c1.metric("Units", f"{t['suggested_units']:g}")
-                color = RISK_COLOR.get(t["risk"], "gray")
-                c2.markdown(f":{color}[**{t['risk']}**] · {t['edge_pct']:+.1%} edge")
-                st.caption(t["reasoning"])
-        if hidden > 0:
-            st.caption(f"+ {hidden} more longshot(s) (3.0+ odds) not shown here.")
+    if within_cap.empty:
+        st.info(f"No value bets at {cap:g} odds or under for this view right now.")
+    else:
+        sports = sorted(within_cap["sport"].unique()) if show_sport_header else [None]
+        for sport in sports:
+            sport_df = within_cap if sport is None else within_cap[within_cap["sport"] == sport]
+            if sport_df.empty:
+                continue
+            shown = sport_df.sort_values(["risk_rank", "edge_pct"], ascending=[True, False])
+            if sport is not None:
+                st.markdown(f"#### {sport.upper()}")
+            for _, t in shown.iterrows():
+                _render_one_tip_card(t)
+
+    if show_excluded and not above_cap.empty:
+        with st.expander(f"Above {cap:g} odds, not shown by default ({len(above_cap)})"):
+            for _, t in above_cap.sort_values("edge_pct", ascending=False).iterrows():
+                _render_one_tip_card(t)
 
 
 def render_knowledge_cards(tips: list, show_sport_header: bool = False):
@@ -179,17 +184,16 @@ with tab_week:
 
     if week_tips:
         df = pd.DataFrame(week_tips)
-        df["odds_bucket"] = df["odds_decimal"].map(_odds_bucket)
-        df["is_line_handicap"] = df["market"].isin(["spreads", "totals"])
-        df["is_preferred_odds"] = df["odds_bucket"] == "Preferred"
-        # Composite score: Line/Handicap and 1.7-2.2 odds both bump a pick up,
-        # edge size breaks ties -- never an empty list just because nothing
-        # happens to match every criterion at once.
-        df["priority"] = (
-            df["is_line_handicap"].astype(int) * 2 + df["is_preferred_odds"].astype(int) + df["edge_pct"]
-        )
+        cap = _max_single_odds()
+        within_cap = df[df["odds_decimal"] <= cap].copy()
+        within_cap["is_line_handicap"] = within_cap["market"].isin(["spreads", "totals"])
+        # Line/Handicap bumps a pick up, edge size breaks ties -- everything
+        # here is already within the odds cap, so no separate odds-range bonus needed.
+        within_cap["priority"] = within_cap["is_line_handicap"].astype(int) + within_cap["edge_pct"]
 
-        big_value = df[df["edge_pct"] >= BIG_VALUE_EDGE_BAR].sort_values("edge_pct", ascending=False).head(1)
+        big_value = within_cap[within_cap["edge_pct"] >= BIG_VALUE_EDGE_BAR].sort_values(
+            "edge_pct", ascending=False
+        ).head(1)
         if not big_value.empty:
             bv = big_value.iloc[0]
             st.success(
@@ -198,38 +202,41 @@ with tab_week:
                 f"({bv['bookmaker']}) — {bv['edge_pct']:+.1%} edge, well above the usual bar."
             )
 
-        recommended = df.sort_values("priority", ascending=False).head(RECOMMENDED_COUNT)
+        recommended = within_cap.sort_values("priority", ascending=False).head(RECOMMENDED_COUNT)
         st.subheader(f"Recommended bets this week ({len(recommended)})")
-        st.caption("Prioritises Line/Handicap and the 1.7-2.2 odds range — a short, curated list, not everything found.")
-        render_value_cards(recommended.to_dict("records"), show_sport_header=True)
+        st.caption(f"All at {cap:g} odds or under, prioritising Line/Handicap — a short, curated list.")
+        render_value_cards(recommended.to_dict("records"), show_sport_header=True, show_excluded=False)
 
         st.divider()
         st.subheader("Multis (cross-game)")
         st.caption(
-            "Combines several of this week's +EV singles from *different* games into one bet — "
-            "bigger combined odds out of picks that individually only show a thin edge. Only "
-            "combines across games (never two markets in the same match — that needs real "
-            "correlation data this tool doesn't have, see Horses-style caveat). Higher variance: "
-            "a multi only pays if every leg wins, so the 'chance all legs hit' number matters as "
-            "much as the edge."
+            "Combines several of this week's +EV singles from *different* games, all at the "
+            "**same bookmaker** (so it's one bet slip you can actually place), into a multi. "
+            "Combined odds capped at 4x, usually closer to 2x. Never combines two markets in "
+            "the same match — that needs real correlation data this tool doesn't have (same "
+            "caveat as Horses). Higher variance than a single: a multi only pays if every leg "
+            "wins, so the 'chance all legs hit' number matters as much as the edge."
         )
         combos = multis.suggest_multis(df.to_dict("records"))
 
         def _render_multi_combo(combo):
             with st.container(border=True):
-                st.markdown(f"**{combo['size']}-leg multi — combined odds {combo['combined_odds']}**")
+                st.markdown(
+                    f"**{combo['size']}-leg multi · {combo['bookmaker']} · "
+                    f"combined odds {combo['combined_odds']}**"
+                )
                 for leg in combo["legs"]:
                     st.markdown(
                         f"- {leg['sport'].upper()}: {leg['matchup']} — "
                         f"{MARKET_LABEL.get(leg['market'], leg['market'])} {leg['selection']} "
-                        f"@ {leg['odds_decimal']} ({leg['bookmaker']})"
+                        f"@ {leg['odds_decimal']}"
                     )
                 c1, c2 = st.columns(2)
                 c1.metric("Combined edge", f"{combo['combined_edge_pct']:+.1%}")
                 c2.metric("Chance all legs hit", f"{combo['implied_hit_pct']:.1%}")
 
         if not combos:
-            st.caption("Not enough picks across different games (odds ≤ 4.0) this week to build one.")
+            st.caption("Not enough same-bookmaker picks across different games this week to build one.")
         else:
             two_leg = [c for c in combos if c["size"] == 2][:4]
             three_leg = [c for c in combos if c["size"] == 3][:3]
@@ -468,6 +475,14 @@ with tab_settings:
     max_units = st.number_input("Max units per bet (hard cap, overrides the above)", min_value=0.5, value=float(db.get_setting("max_units_per_bet", str(DEFAULT_MAX_UNITS_PER_BET))), step=0.5)
     min_edge = st.slider("Minimum edge to flag a tip", 0.0, 0.2, float(db.get_setting("min_edge_pct", str(DEFAULT_MIN_EDGE_PCT))), 0.005, format="%.1f%%")
 
+    st.subheader("Odds range")
+    max_single_odds = st.number_input(
+        "Max odds shown as a normal recommendation (hard cap, not a soft discount)",
+        min_value=1.2, max_value=10.0,
+        value=float(db.get_setting("max_single_odds", str(DEFAULT_MAX_SINGLE_ODDS))), step=0.1,
+    )
+    st.caption("Anything priced above this still gets found and stored, just tucked into a collapsed 'not shown by default' section instead of the main feed.")
+
     if st.button("Save settings"):
         db.set_setting("bankroll_amount", bankroll)
         db.set_setting("unit_size_pct", unit_pct)
@@ -476,6 +491,7 @@ with tab_settings:
         db.set_setting("tier_units_lean", tier_lean)
         db.set_setting("max_units_per_bet", max_units)
         db.set_setting("min_edge_pct", min_edge)
+        db.set_setting("max_single_odds", max_single_odds)
         st.success("Saved.")
 
     st.caption(f"1 unit = ${bankroll * unit_pct:,.2f} at current settings.")

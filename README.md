@@ -53,17 +53,29 @@ version of this code let a noisy single-season Elo number override the
 market, which would've pushed max-size bets on model error. Elo doesn't
 predict spread/total outcomes, so it's h2h-only.
 
-### Multis (`models/multis.py`)
+### Odds cap and Multis
 
-Combines several of the current +EV singles from *different* games into one
-bet — legitimate, since multiplying independent probabilities together is
-correct (unlike a same-game multi, where the legs are correlated and need
-real correlation data or bookmaker-priced SGM odds, neither of which this
-data source has — checked: `sgm` isn't a valid market on The Odds API).
-Legs priced beyond `MAX_LEG_ODDS` (4.0) are excluded from multi-building,
-since stacking longshots compounds into absurd combined odds at a
-single-digit hit chance. Every combo reports edge **and** the realistic
-chance every leg lands — don't read one without the other.
+`config.DEFAULT_MAX_SINGLE_ODDS` (2.2, Settings-configurable) is a hard
+ceiling on the dashboard's main "Value Bets" views — not a soft discount
+zone. Anything priced higher still gets found and stored (useful for
+Performance history and as multi-leg candidates) but is tucked into a
+collapsed "not shown by default" expander instead of the normal feed.
+
+`models/multis.py` combines several of the current +EV singles from
+*different* games into one bet, under two hard rules: every leg must be at
+the **same bookmaker** (a multi is one bet slip at one app — combining the
+best-priced leg from Sportsbet with another from Betfair isn't a bet you
+can actually place), and combined odds are capped at `MAX_COMBINED_ODDS`
+(4.0), with each leg individually capped at `MAX_LEG_ODDS` (2.2, matching
+the single-bet ceiling). An earlier version let three longshots compound
+into ~400-to-1 combined odds at a ~4% hit chance — technically +EV, not a
+sensible recommendation. Cross-game only: combining markets *within* one
+game needs real correlation data or bookmaker-priced SGM odds, neither of
+which this data source has (checked — `sgm` isn't a valid market on The
+Odds API). Every combo reports edge **and** the realistic chance every leg
+lands — don't read one without the other. Because both caps are strict,
+some days turn up very few or zero multis — that's the caps working as
+intended, not a bug to loosen without asking.
 
 ### API quota
 
@@ -165,10 +177,11 @@ your phone.
 ## Using it day to day
 
 1. **This Week** — best picks across every sport for the next 7 days, not
-   just today/tonight. A 🔥 Big Value Alert when something clears a high bar
-   (3%+ edge), a curated 5-pick Recommended list prioritising Line/Handicap +
-   1.7-2.2 odds, cross-game Multis (2-leg front and centre, 3-leg tucked in
-   an expander), then everything else collapsed below.
+   just today/tonight, all within the odds cap (2.2 default). A 🔥 Big
+   Value Alert when something clears a high bar (3%+ edge), a curated
+   5-pick Recommended list prioritising Line/Handicap, same-bookmaker
+   cross-game Multis (2-leg front and centre, 3-leg tucked in an expander),
+   then everything else (including above-cap picks) collapsed below.
 2. **One tab per sport** (NBA, EPL, NBL, NFL, NRL, AFL, BBL) — that sport's
    Value Bets (pick, bookmaker, price, edge, units, risk) and Ball Knowledge
    notes together, looking ~2 weeks ahead, with a manual Refresh button.
