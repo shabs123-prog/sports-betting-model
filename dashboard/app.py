@@ -77,7 +77,7 @@ with tab_tips:
 # ---------------------------------------------------------------- Run Pipeline
 with tab_run:
     st.write("Pulls live odds + schedule data and regenerates today's tips.")
-    sport = st.selectbox("Sport", ["nba"], index=0)
+    sport = st.selectbox("Sport", ["nba", "epl"], index=0)
     if st.button("Run pipeline now", type="primary"):
         log_box = st.empty()
         logs = []

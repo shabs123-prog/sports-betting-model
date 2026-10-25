@@ -37,11 +37,39 @@ def fetch_odds(sport_key: str, markets: str = "h2h", region: str = ODDS_API_REGI
     return resp.json()
 
 
-def best_price_per_outcome(event: dict, market_key: str = "h2h") -> dict:
+def consensus_points(event: dict, market_key: str) -> dict:
+    """
+    {outcome_name: most_common_point} across every bookmaker, for markets that
+    carry a handicap/total line ("spreads", "totals"). h2h outcomes have no
+    point (always None), so this degenerates to a trivial no-op there.
+
+    Point matters because -4.5 and -6.5 are different bets -- devigging a
+    -4.5 price against a -6.5 price as if they were the same market would be
+    meaningless. We only compare prices at whichever line most bookmakers
+    agree on.
+    """
+    from collections import Counter
+
+    points_by_outcome: dict[str, list] = {}
+    for bm in event.get("bookmakers", []):
+        for market in bm.get("markets", []):
+            if market.get("key") != market_key:
+                continue
+            for outcome in market.get("outcomes", []):
+                points_by_outcome.setdefault(outcome["name"], []).append(outcome.get("point"))
+    return {
+        name: Counter(points).most_common(1)[0][0]
+        for name, points in points_by_outcome.items()
+        if points
+    }
+
+
+def best_price_per_outcome(event: dict, market_key: str = "h2h", outcome_points: dict | None = None) -> dict:
     """
     Given one event from fetch_odds(), return:
-    {outcome_name: {"price": best_decimal_price, "bookmaker": title}}
-    scanning across every bookmaker returned for that region.
+    {outcome_name: {"price": best_decimal_price, "bookmaker": title, "point": point}}
+    scanning across every bookmaker returned for that region. If outcome_points
+    is given, only prices quoted at that exact point are considered.
     """
     best: dict[str, dict] = {}
     for bm in event.get("bookmakers", []):
@@ -50,24 +78,33 @@ def best_price_per_outcome(event: dict, market_key: str = "h2h") -> dict:
                 continue
             for outcome in market.get("outcomes", []):
                 name = outcome["name"]
+                point = outcome.get("point")
+                if outcome_points is not None and outcome_points.get(name) != point:
+                    continue
                 price = outcome["price"]
                 if name not in best or price > best[name]["price"]:
-                    best[name] = {"price": price, "bookmaker": bm.get("title", bm.get("key"))}
+                    best[name] = {"price": price, "bookmaker": bm.get("title", bm.get("key")), "point": point}
     return best
 
 
-def bookmaker_books(event: dict, market_key: str = "h2h") -> list[dict]:
+def bookmaker_books(event: dict, market_key: str = "h2h", outcome_points: dict | None = None) -> list[dict]:
     """
     One entry per bookmaker that priced this market:
     [{"bookmaker": title, "prices": {outcome_name: decimal_price, ...}}, ...]
-    Used for devigging (need one bookmaker's full, self-consistent market at a time).
+    Used for devigging (need one bookmaker's full, self-consistent market at a
+    time). If outcome_points is given, only includes a bookmaker's quote for
+    an outcome when it matches that exact line.
     """
     books = []
     for bm in event.get("bookmakers", []):
         for market in bm.get("markets", []):
             if market.get("key") != market_key:
                 continue
-            prices = {o["name"]: o["price"] for o in market.get("outcomes", [])}
+            prices = {}
+            for o in market.get("outcomes", []):
+                if outcome_points is not None and outcome_points.get(o["name"]) != o.get("point"):
+                    continue
+                prices[o["name"]] = o["price"]
             if len(prices) >= 2:
                 books.append({"bookmaker": bm.get("title", bm.get("key")), "prices": prices})
     return books

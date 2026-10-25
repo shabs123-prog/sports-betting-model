@@ -36,6 +36,19 @@ ODDS_API_REGION = "au"
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 BALLDONTLIE_BASE = "https://api.balldontlie.io/v1"
 
-SPORT_KEYS = {
-    "nba": "basketball_nba",
+# "has_history": True means we have a results data source (currently just
+# balldontlie, NBA-only) to train the Elo model and generate ball-knowledge
+# notes. Without it, a sport still gets devig value tips -- just no Elo
+# context and no situational notes.
+SPORT_CONFIG = {
+    "nba": {
+        "odds_key": "basketball_nba",
+        "has_history": True,
+        "markets": ["h2h", "spreads", "totals"],
+    },
+    "epl": {
+        "odds_key": "soccer_epl",
+        "has_history": False,
+        "markets": ["h2h", "spreads", "totals"],
+    },
 }
