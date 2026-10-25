@@ -79,7 +79,18 @@ SPORT_CONFIG = {
         "espn_sport": "basketball",
         "espn_league": "nbl",
         "markets": ["h2h", "spreads", "totals"],
+        # Games are being played (Elo trains fine, 240 games) but AU
+        # bookmakers aren't posting betting markets on it yet as of testing
+        # -- flip this once `python -m scripts.run_daily nbl` returns events.
         "auto_refresh": False,
+    },
+    "nfl": {
+        "odds_key": "americanfootball_nfl",
+        "has_history": True,
+        "espn_sport": "football",
+        "espn_league": "nfl",
+        "markets": ["h2h", "spreads", "totals"],
+        "auto_refresh": True,
     },
     # NRL is off-season for part of the year -- that's not a bug, the
     # pipeline just returns 0 events until the season starts. Flip

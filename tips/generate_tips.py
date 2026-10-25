@@ -46,7 +46,8 @@ def _espn_season_years(sport: str) -> list[int]:
     checked (not guessed) for each of these:
       - nba/nbl: ending-year of a season that spans Oct->Apr (2025-26 = 2026)
       - epl: starting-year of a season that spans Aug->May (2026-27 = 2026)
-      - afl: single calendar year, season spans Feb->Sep
+      - afl/nfl: single calendar year labelled by the year it starts in
+        (AFL: Feb->Sep; NFL: Sep->Feb)
     Returns [prior_season_year, current_season_year].
     """
     today = date.today()
@@ -56,6 +57,8 @@ def _espn_season_years(sport: str) -> list[int]:
         current = today.year if today.month >= 8 else today.year - 1
     elif sport == "afl":
         current = today.year if today.month >= 2 else today.year - 1
+    elif sport == "nfl":
+        current = today.year if today.month >= 3 else today.year - 1
     else:
         raise ValueError(f"No ESPN season convention defined for {sport!r}")
     return [current - 1, current]
@@ -64,6 +67,22 @@ def _espn_season_years(sport: str) -> list[int]:
 def _finished_games_for_elo(sport: str, cfg: dict) -> list:
     season_years = _espn_season_years(sport)
     return espn.get_finished_games_for_training(cfg["espn_sport"], cfg["espn_league"], season_years)
+
+
+# Odds in this range are statistically the hardest to find real edge on
+# (short-priced favourites are efficiently priced; this band sits between
+# "safe favourite" and "proper longshot") -- so when the market does offer
+# something here, it's worth surfacing even at a thinner edge than usual,
+# rather than letting it get crowded out by easier-to-find longshot edges.
+PREFERRED_ODDS_RANGE = (1.7, 2.2)
+PREFERRED_RANGE_EDGE_DISCOUNT = 0.5  # accept half the usual min-edge in that range
+
+
+def _effective_min_edge(decimal_odds: float, base_threshold: float) -> float:
+    lo, hi = PREFERRED_ODDS_RANGE
+    if lo <= decimal_odds <= hi:
+        return base_threshold * PREFERRED_RANGE_EDGE_DISCOUNT
+    return base_threshold
 
 
 def _format_selection(outcome_name: str, point, market_key: str) -> str:
@@ -152,7 +171,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 # disagreements with the market are almost always model noise,
                 # not real edge. It must NEVER be the thing that triggers a tip
                 # or sizes a stake -- that was a bug in an earlier version.
-                if devig_edge_pct >= settings["min_edge_pct"]:
+                if devig_edge_pct >= _effective_min_edge(decimal_odds, settings["min_edge_pct"]):
                     stake = kelly.suggested_stake(
                         fair_prob,
                         decimal_odds,

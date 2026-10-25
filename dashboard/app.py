@@ -39,6 +39,17 @@ tab_tips, tab_knowledge, tab_bonus, tab_run, tab_tracker, tab_perf, tab_settings
 # ---------------------------------------------------------------- Today's Tips
 RISK_ORDER = ["Not Risky", "Neutral", "Risky"]
 RISK_COLOR = {"Not Risky": "green", "Neutral": "orange", "Risky": "red"}
+MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line"}
+ODDS_BUCKET_ORDER = ["Preferred", "Other", "Longshot"]
+MAX_LONGSHOTS_PER_SPORT = 3
+
+
+def _odds_bucket(odds: float) -> str:
+    if 1.7 <= odds <= 2.2:
+        return "Preferred"
+    if odds >= 3.0:
+        return "Longshot"
+    return "Other"
 
 with tab_tips:
     auto_sports = [s for s, cfg in SPORT_CONFIG.items() if cfg.get("auto_refresh")]
@@ -63,22 +74,36 @@ with tab_tips:
         df = pd.DataFrame(value_tips)
         df["risk"] = df["market_fair_prob"].map(risk_label)
         df["risk_rank"] = df["risk"].map(RISK_ORDER.index)
-        df = df.sort_values(["sport", "risk_rank", "edge_pct"], ascending=[True, True, False])
+        df["market_label"] = df["market"].map(lambda m: MARKET_LABEL.get(m, m))
+        df["odds_bucket"] = df["odds_decimal"].map(_odds_bucket)
+        df["odds_bucket_rank"] = df["odds_bucket"].map(ODDS_BUCKET_ORDER.index)
 
         for sport in sorted(df["sport"].unique()):
+            sport_df = df[df["sport"] == sport]
+            longshots = sport_df[sport_df["odds_bucket"] == "Longshot"].sort_values("edge_pct", ascending=False)
+            shown = pd.concat([sport_df[sport_df["odds_bucket"] != "Longshot"], longshots.head(MAX_LONGSHOTS_PER_SPORT)])
+            shown = shown.sort_values(
+                ["odds_bucket_rank", "risk_rank", "edge_pct"], ascending=[True, True, False]
+            )
+            hidden = len(longshots) - min(len(longshots), MAX_LONGSHOTS_PER_SPORT)
+
             st.subheader(sport.upper())
-            for _, t in df[df["sport"] == sport].iterrows():
+            for _, t in shown.iterrows():
                 with st.container(border=True):
                     st.markdown(f"**{t['matchup']}**")
-                    st.markdown(f"{t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}")
+                    st.markdown(
+                        f"**{t['market_label']}** · {t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}"
+                    )
                     c1, c2 = st.columns([1, 2])
                     c1.metric("Units", f"{t['suggested_units']:g}")
                     color = RISK_COLOR.get(t["risk"], "gray")
                     c2.markdown(f":{color}[**{t['risk']}**] · {t['edge_pct']:+.1%} edge")
                     st.caption(t["reasoning"])
+            if hidden > 0:
+                st.caption(f"+ {hidden} more longshot(s) (3.0+ odds) not shown, to keep the feed from being all underdogs.")
         st.caption(
-            "Sorted safest-first within each sport. Risk = how likely the pick is to win "
-            "(favourite vs underdog). Units already scale down for weaker edges via Kelly."
+            "Sorted odds 1.7-2.2 first, then other prices, with longshots (3.0+) capped and pushed "
+            "last — within each, safest risk first. Units already scale down for weaker edges via Kelly."
         )
     else:
         st.info(
