@@ -210,6 +210,22 @@ def run(sport: str = "nba", log=print) -> dict:
     return {"value_tips": value_tips, "knowledge_notes": knowledge_notes_logged}
 
 
+def ensure_fresh(sport: str, log=print) -> dict:
+    """
+    Run the pipeline for this sport only if it hasn't already run today --
+    so opening the dashboard is instant after the first check of the day,
+    instead of re-pulling odds (and, for NBA, re-training Elo from a slow
+    rate-limited balldontlie fetch) on every single page load.
+    """
+    today = date.today().isoformat()
+    last_run = db.get_setting(f"last_run_date_{sport}")
+    if last_run == today:
+        return {"skipped": True}
+    result = run(sport=sport, log=log)
+    db.set_setting(f"last_run_date_{sport}", today)
+    return {"skipped": False, **result}
+
+
 if __name__ == "__main__":
     import sys
 

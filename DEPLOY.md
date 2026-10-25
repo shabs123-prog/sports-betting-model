@@ -52,23 +52,44 @@ MIN_EDGE_PCT = "0.005"
 You'll get a URL like `https://<something>.streamlit.app` — open that on
 your phone and "Add to Home Screen" for an app-like icon.
 
-## Important: bet history won't persist there yet
+## 3. Turn on the daily auto-refresh (so tips are just *there*, instantly)
 
-The dashboard stores tips, logged bets, and settings in a local SQLite file
-(`tips.db`). On Streamlit Cloud, that file survives while the app is just
-sitting idle, but **every time new code gets pushed (a redeploy), the
-container resets and the database goes with it.** Since this project is
-still actively being built, that means logged bets could disappear whenever
-an update ships — not great for "track performance over time."
+Without this, the app refreshes NBA/EPL itself the first time you open it
+each day — which can take 1-2+ minutes (NBA's results-history pull is
+rate-limited by balldontlie's free tier). `.github/workflows/daily-refresh.yml`
+runs that refresh on a schedule instead, before you'd realistically check
+your phone, so the app is instant when you open it.
 
-Two sane ways to handle this, your call:
+1. On GitHub: your repo → **Settings → Secrets and variables → Actions →
+   New repository secret**. Add `ODDS_API_KEY` and `BALLDONTLIE_API_KEY`
+   (same values as your local `.env`).
+2. That's it — it runs daily at 19:00 UTC (~6am AEDT, adjust the cron line
+   in the workflow file for your timezone/DST). You can also trigger it
+   manually any time from the repo's **Actions** tab → "Daily tips refresh"
+   → **Run workflow**.
+
+## Important: this means daily redeploys, which wipes bet history
+
+Here's the real tradeoff of turning on step 3: the workflow commits the
+refreshed `tips.db` back to the repo every day, and Streamlit Cloud
+auto-redeploys on every push to `main` — so **every single day, the live
+app's container resets.** Tips regenerate fine (that's the point), but any
+bets you logged, or settings you changed, through the live cloud app
+**get wiped on that day's redeploy** unless they happened to make it into
+the committed `tips.db` first. This isn't a rare edge case anymore now that
+refreshes are scheduled daily — it'll happen every day.
+
+Two ways to handle it, your call:
 
 - **Use the cloud app to check tips on the go, log bets locally.** Keep
   running `streamlit run dashboard/app.py` on this Mac for the Bet
-  Tracker/Performance tabs where it matters, and use the phone/cloud
-  version for browsing Today's Tips. Zero extra setup.
-- **Move to a real persistent database** (e.g. a free Supabase or Neon
-  Postgres instance) so bet history survives redeploys from any device.
-  This needs one more free account and maybe 20 minutes of me swapping
-  `db/database.py` to talk to it instead of local SQLite — happy to do
-  this next if you want full mobile bet logging.
+  Tracker/Performance tabs where it actually matters, and use the phone/cloud
+  version purely for browsing Today's Tips. Zero extra setup — this is the
+  easy default.
+- **Move bets/settings to a real persistent database** (e.g. a free Supabase
+  or Neon Postgres instance) so they survive redeploys no matter which
+  device logged them. Tips themselves can stay ephemeral (they're meant to
+  regenerate daily anyway) — only `bets` and `settings` actually need this.
+  Needs one more free account and maybe 20 minutes of me swapping
+  `db/database.py` to talk to it. Worth doing if you want to log bets from
+  your phone and trust they'll still be there tomorrow — say the word.

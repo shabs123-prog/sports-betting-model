@@ -15,10 +15,12 @@ from config import (
     DEFAULT_MIN_EDGE_PCT,
     DEFAULT_UNIT_SIZE_PCT,
     SPORT_CONFIG,
+    USER_BOOKMAKERS,
 )
 from db import database as db
-from models import matched_betting
+from models import conversion_finder, matched_betting
 from models.risk import risk_label
+from tips.generate_tips import ensure_fresh
 from tips.generate_tips import run as run_pipeline
 
 st.set_page_config(page_title="Sports Betting Model", layout="wide")
@@ -35,42 +37,54 @@ tab_tips, tab_knowledge, tab_bonus, tab_run, tab_tracker, tab_perf, tab_settings
 )
 
 # ---------------------------------------------------------------- Today's Tips
+RISK_ORDER = ["Not Risky", "Neutral", "Risky"]
+RISK_COLOR = {"Not Risky": "green", "Neutral": "orange", "Risky": "red"}
+
 with tab_tips:
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        selected_date = st.date_input("Game date", value=date.today())
+    auto_sports = [s for s, cfg in SPORT_CONFIG.items() if cfg.get("auto_refresh")]
+    already_checked_today = all(
+        db.get_setting(f"last_run_date_{s}") == date.today().isoformat() for s in auto_sports
+    )
+    if not already_checked_today:
+        with st.spinner(
+            "First check today — refreshing " + ", ".join(s.upper() for s in auto_sports) +
+            ". This can take a minute or two (one-off per day); it'll be instant after this."
+        ):
+            for s in auto_sports:
+                ensure_fresh(s, log=lambda *_a, **_k: None)
+        st.rerun()
+
+    selected_date = st.date_input("Game date", value=date.today())
     date_str = selected_date.isoformat()
 
     value_tips = db.get_tips_for_date(date_str, tip_type="value")
 
-    RISK_ORDER = ["Not Risky", "Neutral", "Risky"]
-    TIP_COLUMNS = {
-        "matchup": "Matchup", "selection": "Pick", "bookmaker": "Bookmaker",
-        "odds_decimal": "Odds", "edge_pct": "Edge", "suggested_units": "Units",
-        "reasoning": "Why",
-    }
-
     if value_tips:
         df = pd.DataFrame(value_tips)
         df["risk"] = df["market_fair_prob"].map(risk_label)
-        sports = sorted(df["sport"].unique())
-        for sport in sports:
-            st.subheader(f"{sport.upper()} — {date_str}")
-            sport_df = df[df["sport"] == sport]
-            for risk in RISK_ORDER:
-                bucket = sport_df[sport_df["risk"] == risk]
-                if bucket.empty:
-                    continue
-                st.markdown(f"**{risk}**")
-                show = bucket[list(TIP_COLUMNS)].rename(columns=TIP_COLUMNS)
-                show["Edge"] = bucket["edge_pct"].map(lambda x: f"{x:+.1%}" if x is not None else "")
-                st.dataframe(show, use_container_width=True, hide_index=True)
+        df["risk_rank"] = df["risk"].map(RISK_ORDER.index)
+        df = df.sort_values(["sport", "risk_rank", "edge_pct"], ascending=[True, True, False])
+
+        for sport in sorted(df["sport"].unique()):
+            st.subheader(sport.upper())
+            for _, t in df[df["sport"] == sport].iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**{t['matchup']}**")
+                    st.markdown(f"{t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}")
+                    c1, c2 = st.columns([1, 2])
+                    c1.metric("Units", f"{t['suggested_units']:g}")
+                    color = RISK_COLOR.get(t["risk"], "gray")
+                    c2.markdown(f":{color}[**{t['risk']}**] · {t['edge_pct']:+.1%} edge")
+                    st.caption(t["reasoning"])
         st.caption(
-            "Risk = how likely the pick is to win (favourite vs underdog), independent of edge size. "
-            "Units already scale down for weaker edges via Kelly — see the 'Why' column for the edge tier."
+            "Sorted safest-first within each sport. Risk = how likely the pick is to win "
+            "(favourite vs underdog). Units already scale down for weaker edges via Kelly."
         )
     else:
-        st.info("No priced value tips for this date yet. Run the pipeline from the 'Run Pipeline' tab.")
+        st.info(
+            "No value tips for this date. NBA/EPL auto-refresh daily — try again shortly, or "
+            "check another sport from the 'Run Pipeline' tab."
+        )
 
 # ---------------------------------------------------------------- Ball Knowledge
 with tab_knowledge:
@@ -96,11 +110,12 @@ with tab_knowledge:
 # ---------------------------------------------------------------- Bonus Converter
 with tab_bonus:
     st.caption(
-        "Turn bonus/free bet money into cash: back the bonus bet at your bookmaker (e.g. "
-        "Ladbrokes), then lay the opposite outcome on an exchange (Betfair) to lock in close "
-        "to the same result either way. You place both legs yourself — this just does the "
-        "lay-stake math. Numbers are entered by hand (not pulled from live odds)."
+        "Turn bonus/free bet money into cash: back the bonus bet at your bookmaker, then lay "
+        "the opposite outcome on an exchange (Betfair) to lock in close to the same result "
+        "either way. You place both legs yourself."
     )
+
+    mode = st.radio("Mode", ["Find the best game for me", "Enter odds manually"], horizontal=True)
 
     bet_kind = st.radio(
         "Bet type",
@@ -110,52 +125,83 @@ with tab_bonus:
     )
     is_free_bet = bet_kind.startswith("Free")
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     with c1:
         stake = st.number_input("Bonus / stake amount ($)", min_value=0.0, value=50.0, step=5.0)
     with c2:
-        back_odds = st.number_input("Back odds (at your bookmaker, decimal)", min_value=1.01, value=4.0, step=0.05)
-    with c3:
-        lay_odds = st.number_input("Lay odds (on Betfair Exchange, decimal)", min_value=1.01, value=4.2, step=0.05)
+        commission = st.slider(
+            "Betfair commission (%) — check your current rate, it varies",
+            0.0, 10.0, 5.0, 0.1,
+        ) / 100
 
-    commission = st.slider(
-        "Betfair commission (%) — check your current rate, it varies by account/promo",
-        0.0, 10.0, 5.0, 0.1,
-    ) / 100
-
-    if stake > 0 and lay_odds > commission:
-        fn = matched_betting.free_bet if is_free_bet else matched_betting.qualifying_bet
-        result = fn(stake, back_odds, lay_odds, commission)
-
-        st.subheader("Lay this much on Betfair")
-        st.metric("Lay stake", f"${result['lay_stake']:.2f}")
-
+    def _show_result(result: dict, stake: float, is_free_bet: bool):
+        st.metric("Lay this much on Betfair", f"${result['lay_stake']:.2f}")
         c1, c2, c3 = st.columns(3)
         c1.metric("If back bet wins", f"${result['profit_if_back_wins']:+.2f}")
         c2.metric("If back bet loses", f"${result['profit_if_back_loses']:+.2f}")
-        c3.metric(
-            "Retained" if is_free_bet else "Cost to qualify",
-            f"{result['retention_pct']:+.1%}",
-        )
-
+        c3.metric("Retained" if is_free_bet else "Cost to qualify", f"{result['retention_pct']:+.1%}")
         if is_free_bet:
-            # Streamlit renders markdown as LaTeX between a pair of "$" -- escape
-            # both or two dollar amounts in one caption get mangled into a math block.
+            # Streamlit renders "$...$" pairs as LaTeX -- escape both or the caption gets mangled.
             st.caption(
                 f"Guaranteed outcome regardless of result: \\${result['worst_case_profit']:+.2f} "
                 f"cash from a \\${stake:.0f} bonus bet ({result['retention_pct']:.0%} retained)."
             )
         else:
             st.caption(
-                f"This is the cost (or small gain) of meeting a qualifying-bet requirement with "
-                f"your own money — typically a small loss, which unlocks the real bonus separately."
+                "Cost (or small gain) of meeting a qualifying-bet requirement with your own "
+                "money — typically a small loss, which unlocks the real bonus separately."
             )
+
+    if mode == "Enter odds manually":
+        c1, c2 = st.columns(2)
+        with c1:
+            back_odds = st.number_input("Back odds (at your bookmaker, decimal)", min_value=1.01, value=4.0, step=0.05)
+        with c2:
+            lay_odds = st.number_input("Lay odds (on Betfair Exchange, decimal)", min_value=1.01, value=4.2, step=0.05)
+
+        if stake > 0 and lay_odds > commission:
+            fn = matched_betting.free_bet if is_free_bet else matched_betting.qualifying_bet
+            _show_result(fn(stake, back_odds, lay_odds, commission), stake, is_free_bet)
+        else:
+            st.warning("Lay odds must be greater than the commission rate for this to be calculable.")
+
     else:
-        st.warning("Lay odds must be greater than the commission rate for this to be calculable.")
+        back_bookmaker = st.selectbox("Which app is the bonus from?", sorted(USER_BOOKMAKERS - {"Betfair"}))
+        sports_to_scan = st.multiselect(
+            "Scan which sports?", list(SPORT_CONFIG.keys()),
+            default=["nba", "epl"], format_func=lambda s: s.upper(),
+        )
+        if st.button("Find best conversion game", type="primary"):
+            scan_cfg = {s: SPORT_CONFIG[s] for s in sports_to_scan}
+            with st.spinner(f"Scanning {', '.join(s.upper() for s in sports_to_scan)} for {back_bookmaker} vs Betfair..."):
+                opportunities = conversion_finder.find_opportunities(
+                    scan_cfg, back_bookmaker, stake, is_free_bet, commission, top_n=10,
+                    log=lambda *_a, **_k: None,
+                )
+            if not opportunities:
+                st.info(
+                    f"No game found right now where both {back_bookmaker} and Betfair Exchange "
+                    "price the same outcome. Try different sports, or use manual entry."
+                )
+            else:
+                st.caption(f"Best {len(opportunities)} opportunities, ranked by cash retained:")
+                for opp in opportunities:
+                    with st.container(border=True):
+                        st.markdown(f"**{opp['sport'].upper()} — {opp['matchup']}**")
+                        st.markdown(
+                            f"Back **{opp['selection']}** @ {opp['back_odds']} ({back_bookmaker}) · "
+                            f"Lay @ {opp['lay_odds']} (Betfair)"
+                        )
+                        _show_result(opp, stake, is_free_bet)
 
 # ---------------------------------------------------------------- Run Pipeline
 with tab_run:
-    st.write("Pulls live odds + schedule data and regenerates today's tips.")
+    st.write(
+        "NBA and EPL refresh automatically (once a day) when you open Today's Tips — "
+        "you shouldn't need this tab for those day-to-day. Use it to force a fresh pull "
+        "mid-day (odds move), or to manually check a sport that isn't auto-refreshed yet "
+        "(NBL/NRL/AFL/BBL — off-season right now)."
+    )
     sport = st.selectbox("Sport", list(SPORT_CONFIG.keys()), index=0,
                           format_func=lambda s: s.upper())
     if st.button("Run pipeline now", type="primary"):
@@ -168,6 +214,7 @@ with tab_run:
 
         try:
             result = run_pipeline(sport=sport, log=log)
+            db.set_setting(f"last_run_date_{sport}", date.today().isoformat())
             st.success(f"Done — {result['value_tips']} value tips, {result['knowledge_notes']} knowledge notes.")
         except Exception as e:
             st.error(f"Pipeline failed: {e}")

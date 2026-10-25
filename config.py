@@ -51,34 +51,44 @@ USER_BOOKMAKERS = {"SportsBet", "PointsBet (AU)", "TAB", "Ladbrokes", "Betfair"}
 # balldontlie, NBA-only) to train the Elo model and generate ball-knowledge
 # notes. Without it, a sport still gets devig value tips -- just no Elo
 # context and no situational notes.
+# "auto_refresh": True means the dashboard refreshes this sport automatically
+# (once per day) when you open Today's Tips -- no manual button press needed.
+# Off for sports confirmed off-season right now so the daily auto-refresh
+# doesn't burn API quota on guaranteed-empty results; flip to True (or just
+# use the Run Pipeline tab manually) once a season starts.
 SPORT_CONFIG = {
     "nba": {
         "odds_key": "basketball_nba",
         "has_history": True,
         "markets": ["h2h", "spreads", "totals"],
+        "auto_refresh": True,
     },
     "epl": {
         "odds_key": "soccer_epl",
         "has_history": False,
         "markets": ["h2h", "spreads", "totals"],
+        "auto_refresh": True,
     },
     "nbl": {
         "odds_key": "basketball_nbl",
         "has_history": False,
         "markets": ["h2h", "spreads", "totals"],
+        "auto_refresh": False,
     },
     # NRL/AFL are off-season for part of the year -- that's not a bug, the
-    # pipeline just returns 0 events until the season starts. Worth running
-    # anyway once it's close (check theoddsapi.com or just try it).
+    # pipeline just returns 0 events until the season starts. Flip
+    # auto_refresh to True (or just run manually) once it's close.
     "nrl": {
         "odds_key": "rugbyleague_nrl",
         "has_history": False,
         "markets": ["h2h", "spreads", "totals"],
+        "auto_refresh": False,
     },
     "afl": {
         "odds_key": "aussierules_afl",
         "has_history": False,
         "markets": ["h2h", "spreads", "totals"],
+        "auto_refresh": False,
     },
     # Cricket markets on The Odds API are structured differently (run lines,
     # not point spreads) -- starting with h2h only until that's tested against
@@ -87,5 +97,6 @@ SPORT_CONFIG = {
         "odds_key": "cricket_big_bash",
         "has_history": False,
         "markets": ["h2h"],
+        "auto_refresh": False,
     },
 }
