@@ -63,12 +63,30 @@ def _load_staking_settings() -> dict:
 # default (0.75) -- a longshot shouldn't outsize the lowest-confidence tier.
 LONGSHOT_UNIT_CAP = 0.75
 
+# Edge tier (how big the mispricing is) stays the dominant axis, but within
+# a tier the risk band (models.risk.risk_label -- a win-probability band,
+# i.e. literally "how likely is this to hit") now scales the stake up or
+# down: a big-edge pick that's also likely to land earns the top of its
+# tier's range, a big-edge pick that's still a near-coinflip earns the
+# bottom. Multiplicative against the three tier_units settings (not a
+# flat table) so it stays correct if those get tuned later, rounded to the
+# nearest quarter-unit for the same "round, intuitive number" reasoning as
+# the base tiers. Explicit feedback: usually 1-2u for most bets, 2.5-3u
+# only for very confident/big-edge picks, 0.5-0.75 fine for lower
+# confidence -- against the current Strong=2.5/Moderate=1.75/Lean=0.75
+# defaults this lands almost exactly on that (full spread: Strong
+# 1.75-3.0, Moderate 1.25-2.0, Lean 0.5-1.0).
+RISK_UNIT_MULTIPLIER = {"Not Risky": 1.2, "Neutral": 1.0, "Risky": 2 / 3}
+MIN_UNITS = 0.5
 
-def _tier_units(tier: str, decimal_odds: float, settings: dict) -> float:
+
+def _tier_units(tier: str, risk: str, decimal_odds: float, settings: dict) -> float:
     base = settings["tier_units"].get(tier, settings["tier_units"]["Lean"])
+    units = base * RISK_UNIT_MULTIPLIER.get(risk, 1.0)
+    units = round(units * 4) / 4  # nearest quarter-unit
     if decimal_odds > settings["max_single_odds"]:
-        base = min(base, LONGSHOT_UNIT_CAP)
-    return round(min(base, settings["max_units"]), 2)
+        units = min(units, LONGSHOT_UNIT_CAP)
+    return round(max(MIN_UNITS, min(units, settings["max_units"])), 2)
 
 
 # Model Elo is draw-aware for exactly zero of the sports configured so far --
@@ -224,8 +242,8 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
                 if devig_edge_pct < _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     continue
                 tier = edge.tier_label(devig_edge_pct)
-                units = _tier_units(tier, decimal_odds, settings)
                 risk = risk_label(fair_prob)
+                units = _tier_units(tier, risk, decimal_odds, settings)
                 reasoning = (
                     f"[{tier} edge · {risk}] No-vig fair probability (AU consensus): {fair_prob:.1%} "
                     f"vs price-implied {1/decimal_odds:.1%} ({devig_edge_pct:+.1%} edge) at {bookmaker}."
@@ -252,12 +270,6 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
 
 def run(sport: str = "nba", log=print) -> dict:
     db.init_db()
-    # Every upcoming game gets re-evaluated on each daily refresh (and again
-    # on a manual Refresh click) -- without superseding the prior run's
-    # still-open tips for this sport first, insert_tip only ever adds, so
-    # the same game would pile up duplicate/stale rows by the time it's
-    # actually played. Already-played games are untouched (history).
-    db.supersede_open_tips(sport, datetime.now(AU_TZ).date().isoformat())
     settings = _load_staking_settings()
     cfg = SPORT_CONFIG[sport]
 
@@ -285,6 +297,18 @@ def run(sport: str = "nba", log=print) -> dict:
     log(f"[{sport}] pulling live odds ({', '.join(cfg['markets'])})...")
     events = odds_api.fetch_odds(cfg["odds_key"], markets=",".join(cfg["markets"]))
     log(f"[{sport}] {len(events)} upcoming games with odds.")
+
+    # Only supersede this sport's previously-open tips once fresh odds are
+    # actually in hand -- not at the top of run(), before fetch_odds() can
+    # still raise (quota exhausted, API down). That ordering bug cleared
+    # every sport's standing tips on a quota-exhausted run with nothing to
+    # replace them, contradicting run_auto_refresh.py's own "leaving its
+    # existing tips as-is" comment on a caught failure. Every upcoming game
+    # still gets re-evaluated on each daily refresh (and each manual
+    # Refresh click) -- insert_tip only ever adds, so the same game would
+    # pile up duplicate/stale rows without this. Already-played games are
+    # untouched either way (history).
+    db.supersede_open_tips(sport, datetime.now(AU_TZ).date().isoformat())
 
     value_tips, prediction_tips, knowledge_notes_logged = 0, 0, 0
     line_history_rows = []  # every outcome's fair prob/point this run, for future line-movement detection
@@ -402,8 +426,8 @@ def run(sport: str = "nba", log=print) -> dict:
                 # or sizes a stake -- that was a bug in an earlier version.
                 if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     tier = edge.tier_label(devig_edge_pct)
-                    units = _tier_units(tier, decimal_odds, settings)
                     risk = risk_label(fair_prob)
+                    units = _tier_units(tier, risk, decimal_odds, settings)
                     reasoning_parts = [
                         f"[{tier} edge · {risk}] No-vig fair probability ({fair_prob_source}): {fair_prob:.1%} "
                         f"vs price-implied {1/decimal_odds:.1%} ({devig_edge_pct:+.1%} edge) at {bookmaker}.",

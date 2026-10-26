@@ -32,6 +32,10 @@ DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.0075"))
 # unit count per tier rather than a continuously-scaled Kelly fraction.
 # Bigger and more intuitive than "0.39 units", still grounded in how
 # confident the edge is. Each is capped by max_units_per_bet regardless.
+# These three are the tier's "Neutral" risk-band midpoint, not the final
+# number shown -- tips/generate_tips.RISK_UNIT_MULTIPLIER scales each one
+# up or down from here based on win-probability band too (see
+# models.risk.risk_label), spreading the real range to roughly 0.5-3.0.
 DEFAULT_TIER_UNITS_STRONG = float(_get_secret("TIER_UNITS_STRONG", "2.5"))
 DEFAULT_TIER_UNITS_MODERATE = float(_get_secret("TIER_UNITS_MODERATE", "1.75"))
 # Explicit feedback: usually prefers 1-2u for most bets (Moderate=1.75 already
