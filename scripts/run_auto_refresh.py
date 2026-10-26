@@ -18,5 +18,14 @@ if __name__ == "__main__":
     for sport, cfg in SPORT_CONFIG.items():
         if not cfg.get("auto_refresh"):
             continue
-        run(sport=sport)
-        db.set_setting(f"last_run_date_{sport}", date.today().isoformat())
+        try:
+            run(sport=sport)
+            db.set_setting(f"last_run_date_{sport}", date.today().isoformat())
+        except Exception as e:
+            # Most likely cause: API quota exhausted for the period. One
+            # sport failing (or the quota running out partway through this
+            # loop) shouldn't block the rest -- without this, a single
+            # failure here crashed the whole script, which meant the GitHub
+            # Action step failed and the commit step after it never ran at
+            # all, even for sports that succeeded before the failure.
+            print(f"[{sport}] refresh failed, leaving its existing tips as-is: {e}")
