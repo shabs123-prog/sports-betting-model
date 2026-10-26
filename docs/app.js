@@ -667,8 +667,11 @@ function init() {
   setActiveTab("week");
   loadData();
 
+  let swRegistration = null;
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {
+    navigator.serviceWorker.register("./sw.js").then((reg) => {
+      swRegistration = reg;
+    }).catch(() => {
       // Offline caching/installability is a nice-to-have, not load-bearing --
       // data.json still loads fine over a plain fetch without it.
     });
@@ -687,7 +690,13 @@ function init() {
 
   setInterval(() => loadData({ silent: true }), POLL_MS);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") loadData({ silent: true });
+    if (document.visibilityState !== "visible") return;
+    loadData({ silent: true });
+    // The browser checks for a new service worker on its own schedule,
+    // which can be slow (sometimes 24h+) -- force an immediate check every
+    // time the app is actually opened/foregrounded, so a shipped update
+    // reaches you the same day instead of "eventually, maybe."
+    if (swRegistration) swRegistration.update();
   });
 
   // One delegated listener handles every button added across renders --
