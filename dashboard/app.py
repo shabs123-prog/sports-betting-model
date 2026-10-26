@@ -72,14 +72,15 @@ def _render_one_tip_card(t):
         st.caption(t["reasoning"])
 
 
-def render_value_cards(tips: list, show_sport_header: bool = False, show_excluded: bool = True):
+def render_value_cards(tips: list, show_sport_header: bool = False):
     """
     Card feed for value-tip rows, hard-ranged to [min_single_odds,
     max_single_odds] (Settings, default 1.6-2.2) -- not a soft discount
-    zone, an actual floor and ceiling. Anything outside it still gets
-    generated/stored (useful data -- e.g. for Performance history) but is
-    tucked into a collapsed expander here instead of shown as a normal
-    recommendation.
+    zone, an actual floor and ceiling. Anything outside it (a longshot)
+    still gets generated/stored (useful data -- e.g. for Performance
+    history, or as a short-priced multi leg) but is never shown here or
+    anywhere else in the UI, per explicit feedback -- no "outside range"
+    expander to dig through.
     """
     if not tips:
         st.info("No value bets for this view right now.")
@@ -92,26 +93,21 @@ def render_value_cards(tips: list, show_sport_header: bool = False, show_exclude
 
     lo, hi = _odds_range()
     in_range = df[(df["odds_decimal"] >= lo) & (df["odds_decimal"] <= hi)]
-    outside_range = df[(df["odds_decimal"] < lo) | (df["odds_decimal"] > hi)]
 
     if in_range.empty:
         st.info(f"No value bets in the {lo:g}-{hi:g} odds range for this view right now.")
-    else:
-        sports = sorted(in_range["sport"].unique()) if show_sport_header else [None]
-        for sport in sports:
-            sport_df = in_range if sport is None else in_range[in_range["sport"] == sport]
-            if sport_df.empty:
-                continue
-            shown = sport_df.sort_values(["risk_rank", "edge_pct"], ascending=[True, False])
-            if sport is not None:
-                st.markdown(f"#### {sport.upper()}")
-            for _, t in shown.iterrows():
-                _render_one_tip_card(t)
+        return
 
-    if show_excluded and not outside_range.empty:
-        with st.expander(f"Outside {lo:g}-{hi:g} odds, not shown by default ({len(outside_range)})"):
-            for _, t in outside_range.sort_values("edge_pct", ascending=False).iterrows():
-                _render_one_tip_card(t)
+    sports = sorted(in_range["sport"].unique()) if show_sport_header else [None]
+    for sport in sports:
+        sport_df = in_range if sport is None else in_range[in_range["sport"] == sport]
+        if sport_df.empty:
+            continue
+        shown = sport_df.sort_values(["risk_rank", "edge_pct"], ascending=[True, False])
+        if sport is not None:
+            st.markdown(f"#### {sport.upper()}")
+        for _, t in shown.iterrows():
+            _render_one_tip_card(t)
 
 
 def render_knowledge_cards(tips: list, show_sport_header: bool = False):
@@ -212,7 +208,7 @@ def render_sport_tab(sport: str):
 
     st.subheader("Value Bets")
     value_tips = db.get_tips_in_range(today_str, end_str, tip_type="value", sport=sport)
-    render_value_cards(value_tips, show_excluded=False)
+    render_value_cards(value_tips)
 
     if cfg["has_history"]:
         st.divider()
@@ -306,14 +302,14 @@ with tab_week:
         if must_bet.empty:
             st.info("Nothing clears the Must-Bet bar this week — see Recommended below for the next best picks.")
         else:
-            render_value_cards(must_bet.to_dict("records"), show_sport_header=True, show_excluded=False)
+            render_value_cards(must_bet.to_dict("records"), show_sport_header=True)
 
         st.divider()
         remaining = within_cap.drop(must_bet.index)
         recommended = remaining.sort_values("priority", ascending=False).head(RECOMMENDED_COUNT)
         st.subheader(f"Recommended bets this week ({len(recommended)})")
         st.caption(f"All within {lo:g}-{hi:g} odds, prioritising Line/Handicap — a short, curated list.")
-        render_value_cards(recommended.to_dict("records"), show_sport_header=True, show_excluded=False)
+        render_value_cards(recommended.to_dict("records"), show_sport_header=True)
 
         # Model leans (Predictions): no confirmed market edge, so kept
         # strictly separate from Must-Bet/Recommended above (those are only
@@ -662,9 +658,9 @@ with tab_settings:
     st.caption(
         "Hard range, not a soft discount -- singles/Predictions outside it still get found and "
         "stored (useful data, e.g. for Performance history, or as short-priced multi legs) but "
-        "are tucked into a collapsed 'not shown by default' section instead of the main feed. "
-        "Multis/SGM have no minimum leg odds -- a short leg below this range can still combine "
-        "into a sensible-priced multi."
+        "aren't shown anywhere in the UI, per explicit feedback -- no 'not shown by default' "
+        "expander to dig through. Multis/SGM have no minimum leg odds -- a short leg below this "
+        "range can still combine into a sensible-priced multi."
     )
 
     if st.button("Save settings"):
