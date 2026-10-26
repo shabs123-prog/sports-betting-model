@@ -25,7 +25,7 @@ from config import (
     TERTIARY_SHARP_REFERENCE_BOOKMAKER,
     USER_BOOKMAKERS,
 )
-from data import espn, odds_api
+from data import espn, espn_injuries, odds_api
 from db import database as db
 from knowledge import situational
 from models import edge, elo
@@ -262,6 +262,8 @@ def run(sport: str = "nba", log=print) -> dict:
     cfg = SPORT_CONFIG[sport]
 
     ratings, team_logs, nickname_index, canonical_names, scoring_averages = {}, {}, {}, [], {}
+    team_id_map: dict[str, str] = {}
+    injury_cache: dict[str, list] = {}  # team_id -> injuries, reused across every event this run
     if cfg["has_history"]:
         log(f"[{sport}] pulling finished games (ESPN) to train Elo ratings...")
         finished_games = _finished_games_for_elo(sport, cfg)
@@ -274,6 +276,7 @@ def run(sport: str = "nba", log=print) -> dict:
         # Points-scored/allowed averages, used to project a likely margin/
         # total for spreads/totals model leans (Elo only predicts win/loss).
         scoring_averages = build_scoring_averages(finished_games)
+        team_id_map = espn.get_team_id_map(cfg["espn_sport"], cfg["espn_league"])
         log(f"[{sport}] trained Elo for {len(ratings)} teams from {len(finished_games)} games.")
     else:
         log(f"[{sport}] no results history wired up yet -- devig value tips only, "
@@ -305,6 +308,15 @@ def run(sport: str = "nba", log=print) -> dict:
             model_probs = {home_odds_name: model_prob_home, away_odds_name: 1 - model_prob_home}
             game_date_obj = date.fromisoformat(game_date)
             notes = situational.generate_notes(home_team, away_team, game_date_obj, team_logs)
+            for team_name in (home_team, away_team):
+                team_id = team_id_map.get(team_name)
+                if not team_id:
+                    continue
+                if team_id not in injury_cache:
+                    injury_cache[team_id] = espn_injuries.get_team_injuries(
+                        cfg["espn_sport"], cfg["espn_league"], team_id
+                    )
+                notes.extend(situational.injury_notes(team_name, injury_cache[team_id]))
             scoring_projection = project_matchup(
                 scoring_averages.get(home_team), scoring_averages.get(away_team)
             )

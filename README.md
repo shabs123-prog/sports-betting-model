@@ -220,8 +220,19 @@ no real bet to attach. Needs a results-history
 source to work from -- `data/espn.py` (ESPN's public site API, no key
 needed) covers NBA/EPL/NBL/AFL (see `config.SPORT_CONFIG`'s `has_history`
 flag). NRL isn't on ESPN's public API (checked, 404s); cricket uses a
-different ESPN API shape not wired up yet. It's deliberately simple in v1 —
-the obvious next upgrade is wiring in an injury-news feed.
+different ESPN API shape not wired up yet.
+
+**Injury notes** (`data/espn_injuries.py`): current Out/Doubtful players get
+pulled from ESPN's separate "core" API (also free, no key) and attached the
+same way as the rest of the situational notes above -- e.g. "Boston
+Celtics: Devin Carter is OUT -- [reason]." Checked live: real, populated
+data for NBA and NFL; EPL comes back empty across all 20 teams (ESPN
+coverage gap there, confirmed directly against the raw endpoint, not a
+bug); AFL/NBL were off-season/preseason when checked so that's untested
+either way. Fails to an empty list rather than raising, so a gap just means
+no extra note that day. Same house rule as every other model/context
+signal here -- colour on a tip's reasoning, never something that triggers
+or sizes one.
 
 ## Bonus Converter (matched betting)
 

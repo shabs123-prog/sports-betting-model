@@ -48,6 +48,16 @@ def get_teams(espn_sport: str, espn_league: str) -> list[dict]:
         raise EspnError(f"Unexpected teams response shape for {espn_sport}/{espn_league}") from e
 
 
+def get_team_id_map(espn_sport: str, espn_league: str) -> dict[str, str]:
+    """{team displayName: espn team id} -- used to look up injuries per team
+    (data/espn_injuries.py), which is keyed by id, not name."""
+    try:
+        teams = get_teams(espn_sport, espn_league)
+    except EspnError:
+        return {}
+    return {t["team"]["displayName"]: t["team"]["id"] for t in teams}
+
+
 def get_team_schedule(espn_sport: str, espn_league: str, team_id: str, season: int | None = None) -> list[dict]:
     params = {"season": season} if season else {}
     data = _get(f"{BASE}/{espn_sport}/{espn_league}/teams/{team_id}/schedule", params)

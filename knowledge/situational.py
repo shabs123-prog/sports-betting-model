@@ -5,10 +5,11 @@ factor in by hand (rest, streaks, situational spots). They get attached to
 value tips as supporting reasoning, and also surface on their own as a
 daily "things to know" feed even when there's no priced edge.
 
-v1 only uses what's derivable from final scores + schedule (ESPN's public
-site API -- see data/espn.py). Injury news is deliberately out of scope
-here -- plug a news/injury feed into `generate_notes` later if you want
-that signal too.
+Started with only what's derivable from final scores + schedule (ESPN's
+public site API -- see data/espn.py); injury_notes() below adds the
+current Out/Doubtful list from data/espn_injuries.py as the same kind of
+plain-text context, same house rule as everything else here -- colour
+attached to a tip's reasoning, never something that triggers or sizes one.
 """
 
 from __future__ import annotations
@@ -80,6 +81,17 @@ def home_away_split(team_log: list[dict], game_date: date) -> dict:
         return sum(1 for g in games if g["team_score"] > g["opp_score"]) / len(games)
 
     return {"home_win_pct": win_pct(home_games), "away_win_pct": win_pct(away_games)}
+
+
+def injury_notes(team_name: str, injuries: list[dict]) -> list[str]:
+    """injuries: data.espn_injuries.get_team_injuries() output for one team."""
+    notes = []
+    for inj in injuries:
+        note = f"{team_name}: {inj['player']} is {inj['status'].upper()}"
+        if inj.get("note"):
+            note += f" -- {inj['note']}"
+        notes.append(note)
+    return notes
 
 
 def generate_notes(home_team: str, away_team: str, game_date: date, team_logs: dict) -> list[str]:
