@@ -6,7 +6,7 @@ dashboard. Markets (h2h/spreads/totals) and whether a sport has a results
 history (for Elo + ball-knowledge notes) are driven by config.SPORT_CONFIG --
 see that file to add a new sport.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from config import (
@@ -18,6 +18,7 @@ from config import (
     DEFAULT_TIER_UNITS_LEAN,
     DEFAULT_TIER_UNITS_MODERATE,
     DEFAULT_TIER_UNITS_STRONG,
+    EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS,
     SECONDARY_SHARP_REFERENCE_BOOKMAKER,
     SHARP_REFERENCE_BOOKMAKER,
     SPORT_CONFIG,
@@ -154,6 +155,88 @@ def _format_selection(outcome_name: str, point, market_key: str) -> str:
     if market_key == "totals":
         return f"{outcome_name} {point:g}"
     return f"{outcome_name} {point:+g}"
+
+
+def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> tuple[int, list[dict]]:
+    """
+    Markets not on the bulk /odds endpoint (e.g. btts) -- one API call per
+    event instead of one per sport, so restricted to events within
+    EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS to keep the extra quota cost bounded.
+    Same devig/edge/tier/sizing pipeline as the main markets, just driven
+    off a per-event fetch instead of the bulk one. Not wired into the
+    Ball Knowledge linked_bet mechanism (that's scoped to the main per-
+    event loop) -- these just land as their own standalone value tips.
+    Returns (value_tips_count, line_history_rows).
+    """
+    extra_markets = cfg.get("extra_event_markets") or []
+    if not extra_markets:
+        return 0, []
+
+    events = odds_api.fetch_events(cfg["odds_key"])
+    cutoff = datetime.now(timezone.utc) + timedelta(days=EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS)
+    near_term = [
+        e for e in events
+        if datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00")) <= cutoff
+    ]
+    log(f"[{sport}] pulling extra markets ({', '.join(extra_markets)}) for "
+        f"{len(near_term)} near-term events (of {len(events)} total)...")
+
+    value_tips = 0
+    line_history_rows = []
+    for event in near_term:
+        matchup = f"{event['away_team']} @ {event['home_team']}"
+        game_date, game_time_local = _local_game_datetime(event["commence_time"])
+        for market in extra_markets:
+            data = odds_api.fetch_event_odds(cfg["odds_key"], event["id"], market)
+            outcome_points = odds_api.consensus_points(data, market, allowed_bookmakers=AU_BOOKMAKERS)
+            books = odds_api.bookmaker_books(data, market, outcome_points, allowed_bookmakers=AU_BOOKMAKERS)
+            if not books:
+                continue
+            au_fair_probs = edge.consensus_fair_probs(books)
+            best_prices = odds_api.best_price_per_outcome(
+                data, market, outcome_points, allowed_bookmakers=USER_BOOKMAKERS
+            )
+            for outcome_name, price_info in best_prices.items():
+                decimal_odds = price_info["price"]
+                bookmaker = price_info["bookmaker"]
+                fair_prob = au_fair_probs.get(outcome_name)
+                if fair_prob is None:
+                    continue
+
+                line_history_rows.append({
+                    "sport": sport, "matchup": matchup, "game_date": game_date,
+                    "market": market, "outcome": outcome_name, "point": None,
+                    "fair_prob": fair_prob, "fair_prob_source": "AU consensus",
+                })
+
+                devig_edge_pct = edge.edge_pct(fair_prob, decimal_odds)
+                if devig_edge_pct < _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
+                    continue
+                tier = edge.tier_label(devig_edge_pct)
+                units = _tier_units(tier, decimal_odds, settings)
+                risk = risk_label(fair_prob)
+                reasoning = (
+                    f"[{tier} edge · {risk}] No-vig fair probability (AU consensus): {fair_prob:.1%} "
+                    f"vs price-implied {1/decimal_odds:.1%} ({devig_edge_pct:+.1%} edge) at {bookmaker}."
+                )
+                db.insert_tip({
+                    "game_date": game_date,
+                    "game_time_local": game_time_local,
+                    "sport": sport,
+                    "matchup": matchup,
+                    "market": market,
+                    "selection": outcome_name,
+                    "bookmaker": bookmaker,
+                    "odds_decimal": decimal_odds,
+                    "model_prob": None,
+                    "market_fair_prob": fair_prob,
+                    "edge_pct": devig_edge_pct,
+                    "suggested_units": units,
+                    "tip_type": "value",
+                    "reasoning": reasoning,
+                })
+                value_tips += 1
+    return value_tips, line_history_rows
 
 
 def run(sport: str = "nba", log=print) -> dict:
@@ -449,6 +532,10 @@ def run(sport: str = "nba", log=print) -> dict:
                 "reasoning": " ".join(knowledge_notes),
             })
             knowledge_notes_logged += 1
+
+    extra_value_tips, extra_line_history_rows = _process_extra_event_markets(sport, cfg, settings, log)
+    value_tips += extra_value_tips
+    line_history_rows.extend(extra_line_history_rows)
 
     db.insert_line_history_batch(line_history_rows)
 

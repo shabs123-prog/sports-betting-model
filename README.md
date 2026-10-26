@@ -142,6 +142,17 @@ day without fail. Drop a sport from `auto_refresh` in `config.SPORT_CONFIG`,
 or run less than daily, if you're hitting the limit -- or upgrade to a paid
 Odds API tier if you want to auto-refresh more sports/more often.
 
+**Extra per-event markets** (`config.SPORT_CONFIG[sport]["extra_event_markets"]`,
+currently just EPL's `btts`) cost quota differently: these aren't on the
+bulk `/odds` endpoint at all, so they're pulled one API call per event
+instead of one call per sport. Restricted to
+`EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS` (7, not the full 14-day window) to
+keep that bounded — EPL alone adds roughly 9 credits/day on top of its
+existing 6, pushing total usage further over the free tier. Confirmed
+live: this genuinely hit 458/500 for the period during development/testing
+of this feature, so real day-to-day usage (without heavy testing) will be
+lower, but the free tier is tight even before this.
+
 Every value tip gets two independent labels:
 
 - **Edge tier** (`models/edge.tier_label`) — Strong / Moderate / Lean, how

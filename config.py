@@ -44,6 +44,12 @@ DEFAULT_TIER_UNITS_LEAN = float(_get_secret("TIER_UNITS_LEAN", "1.0"))
 DEFAULT_MIN_SINGLE_ODDS = float(_get_secret("MIN_SINGLE_ODDS", "1.6"))
 DEFAULT_MAX_SINGLE_ODDS = float(_get_secret("MAX_SINGLE_ODDS", "2.2"))
 
+# Markets only available per-event (not the bulk /odds endpoint, e.g. btts)
+# cost quota per game, not once per sport -- restricting how far ahead we
+# bother pulling them keeps that cost bounded. 7 days, not the full 14,
+# since this is quota-per-game and the free tier is already tight.
+EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS = 7
+
 # Odds API regions -- 'au' is the AU-licensed bookmakers you can actually bet
 # at. 'eu' is added to also pull Pinnacle -- a sharp, low-margin reference
 # book used industry-wide as a "true odds" benchmark, precisely because
@@ -106,6 +112,14 @@ SPORT_CONFIG = {
         "espn_league": "eng.1",
         "markets": ["h2h", "spreads", "totals"],
         "auto_refresh": True,
+        # BTTS isn't on the bulk /odds endpoint (confirmed: 422s there) --
+        # it needs a separate per-event call, which costs quota per game
+        # rather than once per sport. Real coverage though: 4 of 5 held
+        # bookmakers post it (SportsBet/Ladbrokes/PointsBet/Betfair),
+        # unlike EPL's totals/spreads which have zero coverage from any of
+        # them. Restricted to EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS, not the
+        # full window, to keep the extra per-event cost manageable.
+        "extra_event_markets": ["btts"],
     },
     "nbl": {
         "odds_key": "basketball_nbl",

@@ -29,7 +29,7 @@ RECOMMENDED_COUNT = 5
 MUST_BET_MIN_EDGE = 0.015
 MUST_BET_COUNT = 4
 MODEL_LEANS_COUNT = 6  # across all sports combined -- the volume lever when value-tip edge is thin this week
-MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line"}
+MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line", "btts": "BTTS"}
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_PATH = os.path.join(REPO_ROOT, "docs", "data.json")

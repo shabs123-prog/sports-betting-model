@@ -14,6 +14,52 @@ class OddsApiError(RuntimeError):
     pass
 
 
+def fetch_events(sport_key: str) -> list[dict]:
+    """
+    Lightweight event list (id, teams, commence_time) with no odds attached
+    -- free, doesn't cost quota. Used to find event ids for markets that
+    only exist per-event (e.g. btts), which the bulk /odds endpoint 422s on.
+    """
+    if not ODDS_API_KEY:
+        raise OddsApiError(
+            "ODDS_API_KEY is not set. Sign up at https://the-odds-api.com, "
+            "then put your key in .env"
+        )
+    url = f"{ODDS_API_BASE}/sports/{sport_key}/events"
+    resp = requests.get(url, params={"apiKey": ODDS_API_KEY}, timeout=15)
+    if resp.status_code != 200:
+        raise OddsApiError(f"Odds API error {resp.status_code}: {resp.text[:300]}")
+    return resp.json()
+
+
+def fetch_event_odds(sport_key: str, event_id: str, markets: str, region: str = "au") -> dict:
+    """
+    Per-event odds for a market not on the bulk endpoint (e.g. btts, player
+    props) -- costs quota per event call (markets x regions, same as
+    fetch_odds, just once per game instead of once per sport), so use
+    sparingly. Defaults to 'au' only (not ODDS_API_REGION's 'au,eu') to
+    roughly halve that per-event cost -- these markets don't need Pinnacle
+    as a sharp reference as much as h2h/spreads/totals do.
+    """
+    if not ODDS_API_KEY:
+        raise OddsApiError(
+            "ODDS_API_KEY is not set. Sign up at https://the-odds-api.com, "
+            "then put your key in .env"
+        )
+    url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
+    params = {
+        "apiKey": ODDS_API_KEY,
+        "regions": region,
+        "markets": markets,
+        "oddsFormat": "decimal",
+        "dateFormat": "iso",
+    }
+    resp = requests.get(url, params=params, timeout=15)
+    if resp.status_code != 200:
+        raise OddsApiError(f"Odds API error {resp.status_code}: {resp.text[:300]}")
+    return resp.json()
+
+
 def fetch_odds(sport_key: str, markets: str = "h2h", region: str = ODDS_API_REGION) -> list[dict]:
     if not ODDS_API_KEY:
         raise OddsApiError(

@@ -38,7 +38,7 @@ st.caption(
 
 RISK_ORDER = ["Not Risky", "Neutral", "Risky"]
 RISK_COLOR = {"Not Risky": "green", "Neutral": "orange", "Risky": "red"}
-MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line"}
+MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line", "btts": "BTTS"}
 WEEK_AHEAD_DAYS = 14  # how far out each sport tab looks -- value isn't just day-of
 
 
