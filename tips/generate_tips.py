@@ -51,8 +51,19 @@ def _load_staking_settings() -> dict:
     }
 
 
-def _tier_units(tier: str, settings: dict) -> float:
+# A longshot can carry a huge raw edge_pct purely because the model/sharp
+# fair probability diverges a lot from a steep price -- that's a mispricing
+# artifact, not the kind of "I'm confident about this" a Strong tier is
+# meant to signal within the preferred odds range. Capped flat regardless
+# of tier for anything priced above max_single_odds, per explicit feedback:
+# "not gonna do high unit bets on high odd picks."
+LONGSHOT_UNIT_CAP = 1.0
+
+
+def _tier_units(tier: str, decimal_odds: float, settings: dict) -> float:
     base = settings["tier_units"].get(tier, settings["tier_units"]["Lean"])
+    if decimal_odds > settings["max_single_odds"]:
+        base = min(base, LONGSHOT_UNIT_CAP)
     return round(min(base, settings["max_units"]), 2)
 
 
@@ -266,7 +277,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 # or sizes a stake -- that was a bug in an earlier version.
                 if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     tier = edge.tier_label(devig_edge_pct)
-                    units = _tier_units(tier, settings)
+                    units = _tier_units(tier, decimal_odds, settings)
                     risk = risk_label(fair_prob)
                     reasoning_parts = [
                         f"[{tier} edge · {risk}] No-vig fair probability ({fair_prob_source}): {fair_prob:.1%} "
@@ -390,9 +401,37 @@ def run(sport: str = "nba", log=print) -> dict:
         # Odds/units/bookmaker: attach linked_bet (the best value tip on this
         # game, or failing that the prediction tip) when one exists, so the
         # card tells you what to actually bet alongside the context -- not
-        # just description. When neither exists there's no real bet to show,
-        # so those fields stay empty rather than inventing one.
+        # just description.
+        #
+        # Final fallback when neither exists (routine for EPL: h2h favourites
+        # price close to efficient, and AU bookmakers don't post Line/Totals
+        # for EPL through this data source at all -- see README): still show
+        # the home side's current best market price as plain reference, so
+        # the card isn't left with no odds/unit/app just because nothing
+        # cleared the value/prediction bar. Flagged in the note text itself
+        # (not a schema change) so it reads as context, not a recommendation
+        # -- and kept to a flat, small unit, same longshot cap as real picks.
+        reference_price_used = False
+        if linked_bet is None:
+            ref_price = h2h_best_prices.get(home_odds_name)
+            if ref_price:
+                linked_bet = {
+                    "market": "h2h",
+                    "selection": home_odds_name,
+                    "bookmaker": ref_price["bookmaker"],
+                    "odds_decimal": ref_price["price"],
+                    "suggested_units": (
+                        LONGSHOT_UNIT_CAP if ref_price["price"] > settings["max_single_odds"] else 1.0
+                    ),
+                }
+                reference_price_used = True
+
         if notes:
+            knowledge_notes = list(notes)
+            if reference_price_used:
+                knowledge_notes.append(
+                    "No confirmed value or model lean here -- current best price shown for reference only."
+                )
             db.insert_tip({
                 "game_date": game_date,
                 "game_time_local": game_time_local,
@@ -407,7 +446,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 "edge_pct": None,
                 "suggested_units": linked_bet["suggested_units"] if linked_bet else 0,
                 "tip_type": "knowledge",
-                "reasoning": " ".join(notes),
+                "reasoning": " ".join(knowledge_notes),
             })
             knowledge_notes_logged += 1
 

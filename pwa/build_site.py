@@ -26,7 +26,6 @@ from models.risk import risk_label
 
 WEEK_AHEAD_DAYS = 14
 RECOMMENDED_COUNT = 5
-BIG_VALUE_EDGE_BAR = 0.03
 MUST_BET_MIN_EDGE = 0.015
 MUST_BET_COUNT = 4
 MODEL_LEANS_COUNT = 6  # across all sports combined -- the volume lever when value-tip edge is thin this week
@@ -76,7 +75,6 @@ def build_this_week() -> dict:
     model_leans = sorted(week_predictions, key=lambda t: -t["model_prob"])[:MODEL_LEANS_COUNT]
 
     result = {
-        "big_value": None,
         "must_bet": [],
         "recommended": [],
         "model_leans": model_leans,
@@ -91,13 +89,6 @@ def build_this_week() -> dict:
     within_cap = [t for t in week_tips if lo <= t["odds_decimal"] <= hi]
     for t in within_cap:
         t["priority"] = _priority(t)
-
-    big_value = sorted(
-        (t for t in within_cap if t["edge_pct"] >= BIG_VALUE_EDGE_BAR),
-        key=lambda t: -t["edge_pct"],
-    )
-    if big_value:
-        result["big_value"] = big_value[0]
 
     must_bet = sorted(
         (t for t in within_cap if t["edge_pct"] >= MUST_BET_MIN_EDGE and t["risk"] != "Risky"),

@@ -27,10 +27,10 @@ from models.risk import risk_label
 from tips.generate_tips import ensure_fresh
 from tips.generate_tips import run as run_pipeline
 
-st.set_page_config(page_title="Sports Betting Model", layout="wide")
+st.set_page_config(page_title="Shab Shooter", layout="wide")
 db.init_db()
 
-st.title("🏀 Sports Betting Model")
+st.title("🏀 Shab Shooter")
 st.caption(
     "Decision support only — this surfaces priced edges and situational context. "
     "You place every bet yourself. Bet within your means; this is not financial advice."
@@ -250,7 +250,6 @@ tab_week, *sport_tabs, tab_horses, tab_bonus, tab_tracker, tab_perf, tab_setting
 
 # ---------------------------------------------------------------- This Week
 RECOMMENDED_COUNT = 5  # roughly what a "3-4 bets a week" cadence looks like with some to pick from
-BIG_VALUE_EDGE_BAR = 0.03  # Strong-tier edge -- only flag as a special alert, not every week
 MUST_BET_MIN_EDGE = 0.015  # Moderate tier or better
 MUST_BET_COUNT = 4  # "3-4 bets a week" -- the short list is meant to BE that cadence, not a sample of it
 MODEL_LEANS_COUNT = 6  # across all sports combined -- the volume lever when value-tip edge is thin this week
@@ -282,10 +281,10 @@ with tab_week:
 
         # Must-Bet is the single most important thing on this tab -- the short,
         # high-conviction subset of this week's in-range picks (Moderate-tier-
-        # or-better edge AND Not Risky/Neutral win probability). It goes first,
-        # above even the Big Value Alert, with a deliberately loud styled
-        # banner (not just a subheader) so it can't be missed or mistaken for
-        # just another section -- this is specifically "place these if nothing
+        # or-better edge AND Not Risky/Neutral win probability). It goes
+        # first, with a deliberately loud styled banner (not just a
+        # subheader) so it can't be missed or mistaken for just another
+        # section -- this is specifically "place these if nothing
         # else," not one more list among several.
         within_cap["risk"] = within_cap["market_fair_prob"].map(risk_label)
         must_bet = within_cap[
@@ -307,18 +306,6 @@ with tab_week:
             st.info("Nothing clears the Must-Bet bar this week — see Recommended below for the next best picks.")
         else:
             render_value_cards(must_bet.to_dict("records"), show_sport_header=True, show_excluded=False)
-
-        big_value = within_cap[within_cap["edge_pct"] >= BIG_VALUE_EDGE_BAR].sort_values(
-            "edge_pct", ascending=False
-        ).head(1)
-        if not big_value.empty:
-            bv = big_value.iloc[0]
-            st.success(
-                f"🔥 **Big value alert** — {bv['sport'].upper()}: {bv['matchup']} ({_fmt_when(bv)}). "
-                f"{MARKET_LABEL.get(bv['market'], bv['market'])} · {bv['selection']} @ {bv['odds_decimal']} "
-                f"({bv['bookmaker']}) · {bv['suggested_units']:g}u — {bv['edge_pct']:+.1%} edge, "
-                f"well above the usual bar."
-            )
 
         st.divider()
         remaining = within_cap.drop(must_bet.index)
@@ -362,9 +349,6 @@ with tab_week:
                 c3.metric("Chance all legs hit", f"{combo['implied_hit_pct']:.1%}")
 
         def _render_combo_group(combos):
-            if not combos:
-                st.caption("Not enough eligible picks this week to build one.")
-                return
             two_leg = [c for c in combos if c["size"] == 2][:4]
             three_leg = [c for c in combos if c["size"] == 3][:3]
             for combo in two_leg:
@@ -374,26 +358,34 @@ with tab_week:
                     for combo in three_leg:
                         _render_multi_combo(combo)
 
-        st.divider()
-        st.subheader("Multis (cross-game)")
-        st.caption(
-            "Combines several of this week's +EV singles from *different* games, all at the "
-            "**same bookmaker** (so it's one bet slip you can actually place). Combined odds "
-            "capped at 2.2, same ceiling as a single. Higher variance than a single: a multi "
-            "only pays if every leg wins, so the 'chance all legs hit' number matters as much "
-            "as the edge."
-        )
-        _render_combo_group(multis.suggest_multis(df.to_dict("records")))
+        # Multis/SGM only show up when there's actually something to show --
+        # most weeks there isn't enough eligible picks to build one, and a
+        # section that just says "not enough picks" every time is clutter,
+        # not information.
+        week_multis = multis.suggest_multis(df.to_dict("records"))
+        if week_multis:
+            st.divider()
+            st.subheader("Multis (cross-game)")
+            st.caption(
+                "Combines several of this week's +EV singles from *different* games, all at the "
+                "**same bookmaker** (so it's one bet slip you can actually place). Combined odds "
+                "capped at 2.2, same ceiling as a single. Higher variance than a single: a multi "
+                "only pays if every leg wins, so the 'chance all legs hit' number matters as much "
+                "as the edge."
+            )
+            _render_combo_group(week_multis)
 
-        st.divider()
-        st.subheader("Same-Game Multis (SGM)")
-        st.caption(
-            "Combines different markets (Win/Handicap/Line) within the *same* game, same "
-            "bookmaker. Marked **approximate** — these legs are correlated (a team winning and "
-            "the game going under both lean the same way), so the combined edge/hit-chance "
-            "shown is a rough estimate, not a verified number like the cross-game multis above."
-        )
-        _render_combo_group(multis.suggest_sgms(df.to_dict("records")))
+        week_sgms = multis.suggest_sgms(df.to_dict("records"))
+        if week_sgms:
+            st.divider()
+            st.subheader("Same-Game Multis (SGM)")
+            st.caption(
+                "Combines different markets (Win/Handicap/Line) within the *same* game, same "
+                "bookmaker. Marked **approximate** — these legs are correlated (a team winning and "
+                "the game going under both lean the same way), so the combined edge/hit-chance "
+                "shown is a rough estimate, not a verified number like the cross-game multis above."
+            )
+            _render_combo_group(week_sgms)
 
         rest = df.drop(must_bet.index).drop(recommended.index)
         if not rest.empty:

@@ -134,8 +134,8 @@ function renderThisWeek() {
   const [lo, hi] = state.data.odds_range;
 
   // Must-Bet is the single most important thing on this screen -- goes
-  // first, above even the Big Value Alert, in a loud banner (not just a
-  // heading) so it can't be mistaken for just another section.
+  // first, in a loud banner (not just a heading) so it can't be mistaken
+  // for just another section.
   let html = `<div class="must-bet-banner">
     <div class="must-bet-title">🔒 MUST-BET THIS WEEK (${tw.must_bet.length})</div>
     <div class="must-bet-sub">Moderate-or-better edge, Not Risky/Neutral win chance, within ${lo}-${hi} odds — if you only place a few bets this week, place these.</div>
@@ -143,11 +143,6 @@ function renderThisWeek() {
   html += tw.must_bet.length
     ? tw.must_bet.map(tipCard).join("")
     : `<div class="info-box">Nothing clears the Must-Bet bar this week — see Recommended below.</div>`;
-
-  if (tw.big_value) {
-    const bv = tw.big_value;
-    html += `<div class="alert">🔥 <b>Big value alert</b> — ${escapeHtml(bv.sport.toUpperCase())}: ${escapeHtml(bv.matchup)} (${escapeHtml(fmtWhen(bv))}). ${escapeHtml(marketLabel(bv.market))} · ${escapeHtml(bv.selection)} @ ${fmtOdds(bv.odds_decimal)} (${escapeHtml(bv.bookmaker)}) · ${fmtUnits(bv.suggested_units)}u — ${fmtPct(bv.edge_pct)} edge, well above the usual bar.</div>`;
-  }
 
   html += `<section>
     <h2>Recommended bets this week (${tw.recommended.length})</h2>
@@ -161,13 +156,20 @@ function renderThisWeek() {
   html += tw.model_leans.length ? tw.model_leans.map(tipCard).join("") : `<div class="muted-note">No model leans for this view right now.</div>`;
   html += `</section>`;
 
-  html += `<section><h2>Multis (cross-game)</h2>
-    <p class="caption">Combines several of this week's +EV singles from different games, all at the same bookmaker. Combined odds capped at 2.2.</p>
-    ${comboGroup(tw.multis)}</section>`;
-
-  html += `<section><h2>Same-Game Multis (SGM)</h2>
-    <p class="caption">Different markets, same game, same bookmaker. Marked approximate — legs are correlated, not independently verified.</p>
-    ${comboGroup(tw.sgms)}</section>`;
+  // Multis/SGM only show up when there's actually something to show --
+  // most weeks there isn't enough eligible picks to build one, and a
+  // section that just says "not enough picks" every time is clutter, not
+  // information.
+  if (tw.multis.length) {
+    html += `<section><h2>Multis (cross-game)</h2>
+      <p class="caption">Combines several of this week's +EV singles from different games, all at the same bookmaker. Combined odds capped at 2.2.</p>
+      ${comboGroup(tw.multis)}</section>`;
+  }
+  if (tw.sgms.length) {
+    html += `<section><h2>Same-Game Multis (SGM)</h2>
+      <p class="caption">Different markets, same game, same bookmaker. Marked approximate — legs are correlated, not independently verified.</p>
+      ${comboGroup(tw.sgms)}</section>`;
+  }
 
   if (tw.everything_else.length) {
     html += `<section>${expander(`Everything else this week (${tw.everything_else.length})`, tw.everything_else.map(tipCard).join(""))}</section>`;

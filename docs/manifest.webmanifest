@@ -1,6 +1,6 @@
 {
-  "name": "Value Bets",
-  "short_name": "Value Bets",
+  "name": "Shab Shooter",
+  "short_name": "Shab Shooter",
   "description": "Daily value bets, predictions, and ball knowledge across NBA, EPL, NBL, NFL, NRL, AFL, BBL.",
   "start_url": "./index.html",
   "scope": "./",
