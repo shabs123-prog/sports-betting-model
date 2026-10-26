@@ -135,6 +135,25 @@ section .caption, .caption {
   line-height: 1.4;
 }
 
+.must-bet-banner {
+  background: #1d3324;
+  border: 2px solid var(--green);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.must-bet-banner .must-bet-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--green);
+}
+.must-bet-banner .must-bet-sub {
+  color: #b7f3c8;
+  font-size: 0.85rem;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
 .info-box {
   background: #16263b;
   border: 1px solid #214062;

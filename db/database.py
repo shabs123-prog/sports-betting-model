@@ -27,19 +27,32 @@ def get_conn():
 def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA_PATH.read_text())
+        _migrate(conn)
+
+
+def _migrate(conn):
+    """CREATE TABLE IF NOT EXISTS in schema.sql is a no-op on an existing
+    DB, so a new column added there never reaches an already-committed
+    tips.db on its own -- this applies ALTER TABLEs for columns added after
+    the initial schema, idempotently, so the daily-refreshed tips.db (with
+    its accumulated line_history) never needs to be thrown away."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(tips)")}
+    if "game_time_local" not in cols:
+        conn.execute("ALTER TABLE tips ADD COLUMN game_time_local TEXT")
 
 
 def insert_tip(tip: dict) -> int:
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO tips
-               (created_at, game_date, sport, matchup, market, selection, bookmaker,
-                odds_decimal, model_prob, market_fair_prob, edge_pct, suggested_units,
-                tip_type, reasoning, status)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               (created_at, game_date, game_time_local, sport, matchup, market, selection,
+                bookmaker, odds_decimal, model_prob, market_fair_prob, edge_pct,
+                suggested_units, tip_type, reasoning, status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 now_iso(),
                 tip["game_date"],
+                tip.get("game_time_local"),
                 tip["sport"],
                 tip["matchup"],
                 tip["market"],
@@ -58,6 +71,25 @@ def insert_tip(tip: dict) -> int:
         return cur.lastrowid
 
 
+def supersede_open_tips(sport: str, from_date: str):
+    """
+    Marks this sport's still-open tips for games on/after from_date as
+    'superseded', right before a pipeline run generates fresh ones for the
+    same games -- without this, a game re-evaluated on each of several days
+    leading up to it (every daily refresh re-prices every upcoming game) or
+    a repeated manual Refresh click just piles up duplicate/stale rows,
+    since insert_tip only ever adds, never replaces. Already-played games
+    (game_date before from_date) are left alone -- those are history, not
+    something this run is re-evaluating.
+    """
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE tips SET status = 'superseded' "
+            "WHERE sport = ? AND status = 'open' AND game_date >= ?",
+            (sport, from_date),
+        )
+
+
 def get_tips_for_date(game_date: str, tip_type: str | None = None):
     query = "SELECT * FROM tips WHERE game_date = ?"
     params = [game_date]
@@ -70,8 +102,12 @@ def get_tips_for_date(game_date: str, tip_type: str | None = None):
 
 
 def get_tips_in_range(start_date: str, end_date: str, tip_type: str | None = None, sport: str | None = None):
-    """Inclusive date range, e.g. for a 'this week' view spanning several game dates."""
-    query = "SELECT * FROM tips WHERE game_date >= ? AND game_date <= ?"
+    """Inclusive date range, e.g. for a 'this week' view spanning several game dates.
+    status='open' only -- see supersede_open_tips: every pipeline run supersedes
+    that sport's prior not-yet-played tips before generating new ones, so a game
+    re-evaluated on each of several days leading up to it (or a repeated manual
+    Refresh) doesn't pile up as duplicate/stale rows here."""
+    query = "SELECT * FROM tips WHERE status = 'open' AND game_date >= ? AND game_date <= ?"
     params = [start_date, end_date]
     if tip_type:
         query += " AND tip_type = ?"

@@ -25,6 +25,15 @@ function fmtPct(v) {
   return v === null || v === undefined ? "" : (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
 }
 
+function fmtWhen(t) {
+  if (!t || !t.game_date) return "";
+  const parts = String(t.game_date).split("-");
+  if (parts.length !== 3) return t.game_date;
+  const [y, m, d] = parts;
+  const dateStr = `${d}/${m}/${y.slice(2)}`;
+  return t.game_time_local ? `${dateStr}, ${t.game_time_local}` : dateStr;
+}
+
 function marketLabel(m) {
   return (state.data.market_label && state.data.market_label[m]) || m;
 }
@@ -44,7 +53,7 @@ function tipCard(t) {
   return `
     <div class="card">
       <div class="matchup">${escapeHtml(t.matchup)}</div>
-      <div class="date">${escapeHtml(t.game_date)}</div>
+      <div class="date">${escapeHtml(fmtWhen(t))}</div>
       ${hasPrice ? `<div class="pick-line"><b>${escapeHtml(marketLabel(t.market))}</b> · ${escapeHtml(t.selection)} @ <b>${fmtOdds(t.odds_decimal)}</b> · ${escapeHtml(t.bookmaker)}</div>` : ""}
       <div class="meta-row">
         <div><div class="units">${fmtUnits(t.suggested_units)}</div><div class="units-label">Units</div></div>
@@ -61,7 +70,7 @@ function knowledgeCard(t) {
   return `
     <div class="card">
       <div class="matchup">${escapeHtml(t.matchup)}</div>
-      <div class="date">${escapeHtml(t.game_date)}</div>
+      <div class="date">${escapeHtml(fmtWhen(t))}</div>
       <div class="reasoning" style="margin-top:8px;">${escapeHtml(t.reasoning)}</div>
       ${linked}
     </div>`;
@@ -95,7 +104,7 @@ function lineMoveCard(m) {
   return `
     <div class="card">
       <div class="matchup">${escapeHtml(m.sport.toUpperCase())}: ${escapeHtml(m.matchup)}</div>
-      <div class="date">${escapeHtml(m.game_date)}</div>
+      <div class="date">${escapeHtml(fmtWhen(m))}</div>
       <div class="pick-line">${moveLine}</div>
       <div class="caption" style="margin-top:6px;">Tracked over ${m.days_tracked} day(s), ${m.snapshot_count} snapshot(s).</div>
     </div>`;
@@ -121,28 +130,22 @@ function comboGroup(combos) {
 function renderThisWeek() {
   const tw = state.data.this_week;
   const [lo, hi] = state.data.odds_range;
-  let html = `<section>
-    <h2>Line Movement</h2>
-    <p class="caption">Every pipeline run records each line's fair probability (and point, for Line/Handicap) so a genuine move — e.g. a total posted at 192.5 drifting to 190.5 — becomes visible over time. Needs a few days of history before anything shows up; empty at first just means it started tracking.</p>`;
-  if (!tw.line_movement.length) {
-    html += `<div class="info-box">No line has 2+ days of tracked history yet — check back in a few days.</div>`;
-  } else {
-    html += tw.line_movement.map(lineMoveCard).join("");
-  }
-  html += `</section>`;
 
-  if (tw.big_value) {
-    const bv = tw.big_value;
-    html += `<div class="alert">🔥 <b>Big value alert</b> — ${escapeHtml(bv.sport.toUpperCase())}: ${escapeHtml(bv.matchup)} (${escapeHtml(bv.game_date)}). ${escapeHtml(marketLabel(bv.market))} · ${escapeHtml(bv.selection)} @ ${fmtOdds(bv.odds_decimal)} (${escapeHtml(bv.bookmaker)}) · ${fmtUnits(bv.suggested_units)}u — ${fmtPct(bv.edge_pct)} edge, well above the usual bar.</div>`;
-  }
-
-  html += `<section>
-    <h2>🔒 Must-bet this week (${tw.must_bet.length})</h2>
-    <p class="caption">Moderate-or-better edge, Not Risky/Neutral win chance, within ${lo}-${hi} odds — if you only place a few bets this week, place these.</p>`;
+  // Must-Bet is the single most important thing on this screen -- goes
+  // first, above even the Big Value Alert, in a loud banner (not just a
+  // heading) so it can't be mistaken for just another section.
+  let html = `<div class="must-bet-banner">
+    <div class="must-bet-title">🔒 MUST-BET THIS WEEK (${tw.must_bet.length})</div>
+    <div class="must-bet-sub">Moderate-or-better edge, Not Risky/Neutral win chance, within ${lo}-${hi} odds — if you only place a few bets this week, place these.</div>
+  </div>`;
   html += tw.must_bet.length
     ? tw.must_bet.map(tipCard).join("")
     : `<div class="info-box">Nothing clears the Must-Bet bar this week — see Recommended below.</div>`;
-  html += `</section>`;
+
+  if (tw.big_value) {
+    const bv = tw.big_value;
+    html += `<div class="alert">🔥 <b>Big value alert</b> — ${escapeHtml(bv.sport.toUpperCase())}: ${escapeHtml(bv.matchup)} (${escapeHtml(fmtWhen(bv))}). ${escapeHtml(marketLabel(bv.market))} · ${escapeHtml(bv.selection)} @ ${fmtOdds(bv.odds_decimal)} (${escapeHtml(bv.bookmaker)}) · ${fmtUnits(bv.suggested_units)}u — ${fmtPct(bv.edge_pct)} edge, well above the usual bar.</div>`;
+  }
 
   html += `<section>
     <h2>Recommended bets this week (${tw.recommended.length})</h2>
@@ -167,6 +170,19 @@ function renderThisWeek() {
   if (tw.everything_else.length) {
     html += `<section>${expander(`Everything else this week (${tw.everything_else.length})`, tw.everything_else.map(tipCard).join(""))}</section>`;
   }
+
+  // Line Movement goes last -- supplementary context (and often just "check
+  // back in a few days" while history cold-starts), so it shouldn't push
+  // the actually-actionable lists above further down the screen.
+  html += `<section>
+    <h2>Line Movement</h2>
+    <p class="caption">Every pipeline run records each line's fair probability (and point, for Line/Handicap) so a genuine move — e.g. a total posted at 192.5 drifting to 190.5 — becomes visible over time. Needs a few days of history before anything shows up; empty at first just means it started tracking.</p>`;
+  if (!tw.line_movement.length) {
+    html += `<div class="info-box">No line has 2+ days of tracked history yet — check back in a few days.</div>`;
+  } else {
+    html += tw.line_movement.map(lineMoveCard).join("");
+  }
+  html += `</section>`;
 
   return html;
 }

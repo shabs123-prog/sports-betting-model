@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS tips (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
     game_date TEXT NOT NULL,
+    game_time_local TEXT,            -- e.g. "7:30 pm", AU-local kickoff/tip-off time
     sport TEXT NOT NULL,
     matchup TEXT NOT NULL,
     market TEXT NOT NULL,

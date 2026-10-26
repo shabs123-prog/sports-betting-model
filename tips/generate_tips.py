@@ -122,7 +122,7 @@ def _effective_min_edge(decimal_odds: float, market: str, base_threshold: float)
 AU_TZ = ZoneInfo("Australia/Sydney")  # handles AEST/AEDT automatically
 
 
-def _local_game_date(commence_time_iso: str) -> str:
+def _local_game_datetime(commence_time_iso: str) -> tuple[str, str]:
     """
     The Odds API's commence_time is UTC. AEDT is UTC+11, so a game at, say,
     9am UTC is already 8pm *tonight* in Sydney -- taking the UTC date
@@ -130,9 +130,11 @@ def _local_game_date(commence_time_iso: str) -> str:
     "tomorrow" locally (or vice versa near local midnight, when UTC is
     still on the previous day). Convert to AU local time before taking the
     date, so "today" in the dashboard means what an AU user means by it.
+    Returns (ISO date, local kickoff/tip-off time like "7:30 pm").
     """
     dt_utc = datetime.fromisoformat(commence_time_iso.replace("Z", "+00:00"))
-    return dt_utc.astimezone(AU_TZ).date().isoformat()
+    dt_local = dt_utc.astimezone(AU_TZ)
+    return dt_local.date().isoformat(), dt_local.strftime("%-I:%M %p").lower()
 
 
 def _format_selection(outcome_name: str, point, market_key: str) -> str:
@@ -145,6 +147,12 @@ def _format_selection(outcome_name: str, point, market_key: str) -> str:
 
 def run(sport: str = "nba", log=print) -> dict:
     db.init_db()
+    # Every upcoming game gets re-evaluated on each daily refresh (and again
+    # on a manual Refresh click) -- without superseding the prior run's
+    # still-open tips for this sport first, insert_tip only ever adds, so
+    # the same game would pile up duplicate/stale rows by the time it's
+    # actually played. Already-played games are untouched (history).
+    db.supersede_open_tips(sport, datetime.now(AU_TZ).date().isoformat())
     settings = _load_staking_settings()
     cfg = SPORT_CONFIG[sport]
 
@@ -172,7 +180,7 @@ def run(sport: str = "nba", log=print) -> dict:
     for event in events:
         home_odds_name = event["home_team"]
         away_odds_name = event["away_team"]
-        game_date = _local_game_date(event["commence_time"])
+        game_date, game_time_local = _local_game_datetime(event["commence_time"])
         matchup = f"{away_odds_name} @ {home_odds_name}"
 
         model_probs = {}
@@ -297,6 +305,7 @@ def run(sport: str = "nba", log=print) -> dict:
 
                     db.insert_tip({
                         "game_date": game_date,
+                        "game_time_local": game_time_local,
                         "sport": sport,
                         "matchup": matchup,
                         "market": market,
@@ -342,6 +351,7 @@ def run(sport: str = "nba", log=print) -> dict:
                     reasoning_parts.extend(notes)
                 db.insert_tip({
                     "game_date": game_date,
+                    "game_time_local": game_time_local,
                     "sport": sport,
                     "matchup": matchup,
                     "market": "h2h",
@@ -385,6 +395,7 @@ def run(sport: str = "nba", log=print) -> dict:
         if notes:
             db.insert_tip({
                 "game_date": game_date,
+                "game_time_local": game_time_local,
                 "sport": sport,
                 "matchup": matchup,
                 "market": linked_bet["market"] if linked_bet else "h2h",

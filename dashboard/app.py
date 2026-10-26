@@ -48,9 +48,20 @@ def _odds_range() -> tuple[float, float]:
     return lo, hi
 
 
+def _fmt_when(t) -> str:
+    """DD/MM/YY + local kickoff/tip-off time, e.g. '26/10/26, 7:30 pm' --
+    falls back to date-only for any row from before game_time_local existed."""
+    try:
+        date_str = date.fromisoformat(t["game_date"]).strftime("%d/%m/%y")
+    except (KeyError, ValueError, TypeError):
+        return str(t.get("game_date", ""))
+    time_str = t.get("game_time_local")
+    return f"{date_str}, {time_str}" if isinstance(time_str, str) and time_str else date_str
+
+
 def _render_one_tip_card(t):
     with st.container(border=True):
-        st.markdown(f"**{t['matchup']}** · {t['game_date']}")
+        st.markdown(f"**{t['matchup']}** · {_fmt_when(t)}")
         st.markdown(
             f"**{t['market_label']}** · {t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}"
         )
@@ -122,7 +133,7 @@ def render_knowledge_cards(tips: list, show_sport_header: bool = False):
             if sport is not None and t["sport"] != sport:
                 continue
             with st.container(border=True):
-                st.markdown(f"**{t['matchup']}** · {t['game_date']}")
+                st.markdown(f"**{t['matchup']}** · {_fmt_when(t)}")
                 st.write(t["reasoning"])
                 if t.get("bookmaker") and t.get("odds_decimal"):
                     label = MARKET_LABEL.get(t["market"], t["market"])
@@ -137,7 +148,7 @@ MAX_PREDICTIONS_PER_SPORT = 4  # "3-4 bets a day" -- best 4 shown; rest in an ex
 
 def _render_one_prediction_card(t):
     with st.container(border=True):
-        st.markdown(f"**{t['matchup']}** · {t['game_date']}")
+        st.markdown(f"**{t['matchup']}** · {_fmt_when(t)}")
         st.markdown(
             f"**{t['market_label']}** · {t['selection']} @ **{t['odds_decimal']}** · {t['bookmaker']}"
         )
@@ -251,40 +262,6 @@ with tab_week:
         "before the line sharpens closer to kickoff."
     )
 
-    st.subheader("Line Movement")
-    st.caption(
-        "Every pipeline run records each line's fair probability (and point, for Line/Handicap) "
-        "so a genuine move — e.g. a total posted at 192.5 drifting to 190.5 — becomes visible "
-        "over time, not just a single snapshot. Needs a few days of history before anything "
-        "shows up here; empty at first means it just started tracking, not that it's broken."
-    )
-    today_str_lm = date.today().isoformat()
-    week_end_str_lm = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
-    moved_lines = db.get_moved_lines(today_str_lm, week_end_str_lm)
-    if not moved_lines:
-        st.info("No line has 2+ days of tracked history yet — check back in a few days.")
-    else:
-        def _movement_size(m):
-            first, latest = m["first"], m["latest"]
-            if first["point"] is not None and latest["point"] is not None:
-                return abs(latest["point"] - first["point"])
-            return abs(latest["fair_prob"] - first["fair_prob"])
-
-        for m in sorted(moved_lines, key=_movement_size, reverse=True)[:10]:
-            first, latest = m["first"], m["latest"]
-            with st.container(border=True):
-                st.markdown(f"**{m['sport'].upper()}: {m['matchup']}** · {m['game_date']}")
-                label = MARKET_LABEL.get(m["market"], m["market"])
-                if first["point"] is not None:
-                    st.markdown(f"{label} · {m['outcome']}: **{first['point']:g} → {latest['point']:g}**")
-                else:
-                    st.markdown(
-                        f"{label} · {m['outcome']}: fair probability "
-                        f"**{first['fair_prob']:.1%} → {latest['fair_prob']:.1%}**"
-                    )
-                st.caption(f"Tracked over {m['days_tracked']} day(s), {m['snapshot_count']} snapshot(s).")
-
-    st.divider()
     today_str = date.today().isoformat()
     week_end_str = (date.today() + timedelta(days=7)).isoformat()
     week_tips = db.get_tips_in_range(today_str, week_end_str, tip_type="value")
@@ -298,38 +275,45 @@ with tab_week:
         # here is already within the odds range, so no separate odds bonus needed.
         within_cap["priority"] = within_cap["is_line_handicap"].astype(int) + within_cap["edge_pct"]
 
+        # Must-Bet is the single most important thing on this tab -- the short,
+        # high-conviction subset of this week's in-range picks (Moderate-tier-
+        # or-better edge AND Not Risky/Neutral win probability). It goes first,
+        # above even the Big Value Alert, with a deliberately loud styled
+        # banner (not just a subheader) so it can't be missed or mistaken for
+        # just another section -- this is specifically "place these if nothing
+        # else," not one more list among several.
+        within_cap["risk"] = within_cap["market_fair_prob"].map(risk_label)
+        must_bet = within_cap[
+            (within_cap["edge_pct"] >= MUST_BET_MIN_EDGE) & (within_cap["risk"] != "Risky")
+        ].sort_values("priority", ascending=False).head(MUST_BET_COUNT)
+
+        st.markdown(
+            f"""<div style="background:#1d3324;border:2px solid #3dd56d;border-radius:12px;
+            padding:16px 20px;margin-bottom:12px;">
+            <div style="font-size:1.4rem;font-weight:800;color:#3dd56d;">
+            🔒 MUST-BET THIS WEEK ({len(must_bet)})</div>
+            <div style="color:#b7f3c8;font-size:0.92rem;margin-top:4px;">
+            Moderate-or-better edge, Not Risky/Neutral win chance, within {lo:g}-{hi:g} odds —
+            if you only place a few bets this week, place these.</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+        if must_bet.empty:
+            st.info("Nothing clears the Must-Bet bar this week — see Recommended below for the next best picks.")
+        else:
+            render_value_cards(must_bet.to_dict("records"), show_sport_header=True, show_excluded=False)
+
         big_value = within_cap[within_cap["edge_pct"] >= BIG_VALUE_EDGE_BAR].sort_values(
             "edge_pct", ascending=False
         ).head(1)
         if not big_value.empty:
             bv = big_value.iloc[0]
             st.success(
-                f"🔥 **Big value alert** — {bv['sport'].upper()}: {bv['matchup']} ({bv['game_date']}). "
+                f"🔥 **Big value alert** — {bv['sport'].upper()}: {bv['matchup']} ({_fmt_when(bv)}). "
                 f"{MARKET_LABEL.get(bv['market'], bv['market'])} · {bv['selection']} @ {bv['odds_decimal']} "
                 f"({bv['bookmaker']}) · {bv['suggested_units']:g}u — {bv['edge_pct']:+.1%} edge, "
                 f"well above the usual bar."
             )
-
-        # Must-Bet: the short, high-conviction subset of this week's in-range
-        # picks -- Moderate-tier-or-better edge AND Not Risky/Neutral win
-        # probability. A "Strong" edge on a 15%-chance longshot is still a
-        # longshot; this bar excludes those even though they'd clear
-        # Recommended below, so what lands here is specifically what you'd
-        # want to place even if you only do a handful of bets this week.
-        within_cap["risk"] = within_cap["market_fair_prob"].map(risk_label)
-        must_bet = within_cap[
-            (within_cap["edge_pct"] >= MUST_BET_MIN_EDGE) & (within_cap["risk"] != "Risky")
-        ].sort_values("priority", ascending=False).head(MUST_BET_COUNT)
-
-        st.subheader(f"🔒 Must-bet this week ({len(must_bet)})")
-        st.caption(
-            f"Moderate-or-better edge, Not Risky/Neutral win chance, within {lo:g}-{hi:g} odds — "
-            "if you only place a few bets this week, place these."
-        )
-        if must_bet.empty:
-            st.info("Nothing clears the Must-Bet bar this week — see Recommended below for the next best picks.")
-        else:
-            render_value_cards(must_bet.to_dict("records"), show_sport_header=True, show_excluded=False)
 
         st.divider()
         remaining = within_cap.drop(must_bet.index)
@@ -412,6 +396,44 @@ with tab_week:
                 render_value_cards(rest.to_dict("records"), show_sport_header=True)
     else:
         st.info("No value tips for the week yet — refresh sports from their own tabs.")
+
+    # Line Movement goes last -- it's supplementary context (and often just
+    # "check back in a few days" while history is cold-starting), so it
+    # shouldn't push the actually-actionable Must-Bet/Recommended lists
+    # further down the page.
+    st.divider()
+    st.subheader("Line Movement")
+    st.caption(
+        "Every pipeline run records each line's fair probability (and point, for Line/Handicap) "
+        "so a genuine move — e.g. a total posted at 192.5 drifting to 190.5 — becomes visible "
+        "over time, not just a single snapshot. Needs a few days of history before anything "
+        "shows up here; empty at first means it just started tracking, not that it's broken."
+    )
+    today_str_lm = date.today().isoformat()
+    week_end_str_lm = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
+    moved_lines = db.get_moved_lines(today_str_lm, week_end_str_lm)
+    if not moved_lines:
+        st.info("No line has 2+ days of tracked history yet — check back in a few days.")
+    else:
+        def _movement_size(m):
+            first, latest = m["first"], m["latest"]
+            if first["point"] is not None and latest["point"] is not None:
+                return abs(latest["point"] - first["point"])
+            return abs(latest["fair_prob"] - first["fair_prob"])
+
+        for m in sorted(moved_lines, key=_movement_size, reverse=True)[:10]:
+            first, latest = m["first"], m["latest"]
+            with st.container(border=True):
+                st.markdown(f"**{m['sport'].upper()}: {m['matchup']}** · {_fmt_when(m)}")
+                label = MARKET_LABEL.get(m["market"], m["market"])
+                if first["point"] is not None:
+                    st.markdown(f"{label} · {m['outcome']}: **{first['point']:g} → {latest['point']:g}**")
+                else:
+                    st.markdown(
+                        f"{label} · {m['outcome']}: fair probability "
+                        f"**{first['fair_prob']:.1%} → {latest['fair_prob']:.1%}**"
+                    )
+                st.caption(f"Tracked over {m['days_tracked']} day(s), {m['snapshot_count']} snapshot(s).")
 
 # ---------------------------------------------------------------- Per-sport tabs
 for sport, tab in zip(sport_tab_names, sport_tabs):
