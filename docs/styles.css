@@ -149,6 +149,7 @@ select.form-input {
 .risk-Not-Risky { color: var(--green); font-weight: 600; }
 .risk-Neutral { color: var(--orange); font-weight: 600; }
 .risk-Risky { color: var(--red); font-weight: 600; }
+.tier-Lean { color: var(--text-dim); font-weight: 600; }
 
 .card .reasoning {
   margin-top: 8px;

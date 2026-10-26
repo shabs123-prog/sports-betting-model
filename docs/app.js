@@ -51,10 +51,32 @@ function riskClass(risk) {
   return "";
 }
 
+// Risk (win probability band) and edge tier (size of the mispricing) are
+// separate signals -- a pick can be "Strong" edge and "Risky" at once (a
+// real mispriced longshot), or "Lean" edge and "Not Risky" (barely-there
+// value on a heavy favourite). Risk alone answers "how likely is this to
+// land," not "how good a bet is this" -- tier is the one that actually
+// answers that, so it gets its own badge too. Mirrors models/edge.py's
+// EDGE_TIERS exactly.
+function tierLabel(edgePct) {
+  if (edgePct === null || edgePct === undefined) return null;
+  if (edgePct >= 0.03) return "Strong";
+  if (edgePct >= 0.015) return "Moderate";
+  return "Lean";
+}
+function tierClass(tier) {
+  if (tier === "Strong") return "risk-Not-Risky";
+  if (tier === "Moderate") return "risk-Neutral";
+  return "tier-Lean";
+}
+
 function tipCard(t) {
   const hasPrice = t.bookmaker && t.odds_decimal;
+  const tier = tierLabel(t.edge_pct);
   const riskEdge = t.risk
-    ? `<span class="${riskClass(t.risk)}">${t.risk}</span>` + (t.edge_pct !== null && t.edge_pct !== undefined ? ` · ${fmtPct(t.edge_pct)} edge` : "")
+    ? (tier ? `<span class="${tierClass(tier)}">${tier} edge</span> · ` : "") +
+      `<span class="${riskClass(t.risk)}">${t.risk}</span>` +
+      (t.edge_pct !== null && t.edge_pct !== undefined ? ` · ${fmtPct(t.edge_pct)}` : "")
     : (t.model_prob !== null && t.model_prob !== undefined ? `Model confidence: <b>${(t.model_prob * 100).toFixed(1)}%</b>` : "");
   return `
     <div class="card">

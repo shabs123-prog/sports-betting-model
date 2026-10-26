@@ -23,6 +23,7 @@ from config import (
 )
 from db import database as db
 from models import conversion_finder, matched_betting, multis
+from models.edge import tier_label
 from models.risk import risk_label
 from tips.generate_tips import ensure_fresh
 from tips.generate_tips import run as run_pipeline
@@ -42,6 +43,13 @@ st.caption(
 
 RISK_ORDER = ["Not Risky", "Neutral", "Risky"]
 RISK_COLOR = {"Not Risky": "green", "Neutral": "orange", "Risky": "red"}
+# Risk (win probability band) and edge tier (how big the mispricing is) are
+# two separate signals that get confused for each other -- a pick can be
+# "Strong" edge and "Risky" at once (a real mispriced longshot) or "Lean"
+# edge and "Not Risky" (barely-there value on a heavy favourite). Risk alone
+# answers "how likely is this to land," not "how good a bet is this" --
+# tier is the one that actually answers that, so it gets its own badge too.
+TIER_COLOR = {"Strong": "green", "Moderate": "orange", "Lean": "gray"}
 MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line", "btts": "BTTS"}
 WEEK_AHEAD_DAYS = 14  # how far out each sport tab looks -- value isn't just day-of
 
@@ -71,8 +79,12 @@ def _render_one_tip_card(t):
         )
         c1, c2 = st.columns([1, 2])
         c1.metric("Units", f"{t['suggested_units']:g}")
-        color = RISK_COLOR.get(t["risk"], "gray")
-        c2.markdown(f":{color}[**{t['risk']}**] · {t['edge_pct']:+.1%} edge")
+        tier = tier_label(t["edge_pct"])
+        tier_color = TIER_COLOR.get(tier, "gray")
+        risk_color = RISK_COLOR.get(t["risk"], "gray")
+        c2.markdown(
+            f":{tier_color}[**{tier} edge**] · :{risk_color}[{t['risk']}] · {t['edge_pct']:+.1%}"
+        )
         st.caption(t["reasoning"])
 
 
