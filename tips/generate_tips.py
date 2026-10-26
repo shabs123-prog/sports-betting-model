@@ -31,6 +31,7 @@ from knowledge import situational
 from models import edge, elo
 from models.devig import devig_book
 from models.risk import risk_label
+from models.scoring import build_scoring_averages, project_matchup
 from models.team_names import build_nickname_index, resolve
 
 
@@ -83,6 +84,12 @@ PREDICTION_MIN_MODEL_PROB = 0.55
 # No confirmed market edge at all (lower confidence than even a Lean value
 # tip, which has a real-if-small detected edge) -- shouldn't out-stake Lean.
 PREDICTION_UNITS = 0.75
+# How far the points-scored/allowed projection has to clear a spreads/totals
+# line (as a fraction of the projected total) before it's worth a lean --
+# same idea as a value tip's min-edge bar, just applied to a points gap
+# instead of a probability gap. Not sport-specific (NBA totals ~220,
+# NFL ~45) since it scales with the projection itself.
+PREDICTION_LEAN_MIN_GAP_PCT = 0.015
 
 
 def _espn_season_years(sport: str) -> list[int]:
@@ -254,7 +261,7 @@ def run(sport: str = "nba", log=print) -> dict:
     settings = _load_staking_settings()
     cfg = SPORT_CONFIG[sport]
 
-    ratings, team_logs, nickname_index, canonical_names = {}, {}, {}, []
+    ratings, team_logs, nickname_index, canonical_names, scoring_averages = {}, {}, {}, [], {}
     if cfg["has_history"]:
         log(f"[{sport}] pulling finished games (ESPN) to train Elo ratings...")
         finished_games = _finished_games_for_elo(sport, cfg)
@@ -263,6 +270,10 @@ def run(sport: str = "nba", log=print) -> dict:
         team_logs = situational.build_team_game_log(finished_games)
         canonical_names = list(ratings.keys())
         nickname_index = build_nickname_index(canonical_names)
+        # Same finished_games Elo already trains on -- no extra ESPN call.
+        # Points-scored/allowed averages, used to project a likely margin/
+        # total for spreads/totals model leans (Elo only predicts win/loss).
+        scoring_averages = build_scoring_averages(finished_games)
         log(f"[{sport}] trained Elo for {len(ratings)} teams from {len(finished_games)} games.")
     else:
         log(f"[{sport}] no results history wired up yet -- devig value tips only, "
@@ -283,6 +294,7 @@ def run(sport: str = "nba", log=print) -> dict:
 
         model_probs = {}
         notes = []
+        scoring_projection = None
         linked_bet = None  # best priced tip found for this game, attached to its Ball Knowledge note
         if cfg["has_history"]:
             home_team = resolve(home_odds_name, canonical_names, nickname_index) or home_odds_name
@@ -293,8 +305,13 @@ def run(sport: str = "nba", log=print) -> dict:
             model_probs = {home_odds_name: model_prob_home, away_odds_name: 1 - model_prob_home}
             game_date_obj = date.fromisoformat(game_date)
             notes = situational.generate_notes(home_team, away_team, game_date_obj, team_logs)
+            scoring_projection = project_matchup(
+                scoring_averages.get(home_team), scoring_averages.get(away_team)
+            )
 
         h2h_best_prices, h2h_value_outcomes = {}, set()
+        spreads_best_prices, totals_best_prices = {}, {}
+        spreads_value_outcomes, totals_value_outcomes = set(), set()
         for market in cfg["markets"]:
             # Point consensus and the "AU consensus" fair prob both stay
             # AU-only -- Pinnacle quoting a different point, or being blended
@@ -335,6 +352,10 @@ def run(sport: str = "nba", log=print) -> dict:
             )
             if market == "h2h":
                 h2h_best_prices = best_prices
+            elif market == "spreads":
+                spreads_best_prices = best_prices
+            elif market == "totals":
+                totals_best_prices = best_prices
 
             for outcome_name, price_info in best_prices.items():
                 decimal_odds = price_info["price"]
@@ -425,6 +446,10 @@ def run(sport: str = "nba", log=print) -> dict:
                     value_tips += 1
                     if market == "h2h":
                         h2h_value_outcomes.add(outcome_name)
+                    elif market == "spreads":
+                        spreads_value_outcomes.add(outcome_name)
+                    elif market == "totals":
+                        totals_value_outcomes.add(outcome_name)
 
         # Prediction tips: no confirmed market edge, just "the model likes
         # this side" -- clearly a different, lower-confidence claim than a
@@ -480,6 +505,114 @@ def run(sport: str = "nba", log=print) -> dict:
                         "odds_decimal": decimal_odds,
                         "suggested_units": PREDICTION_UNITS,
                         "edge_pct": -1.0,
+                    }
+
+        # Scoring-projection leans (spreads/totals): same "model lean, no
+        # confirmed market edge" idea as the h2h Predictions above, but
+        # using the points-scored/allowed projection instead of Elo -- Elo
+        # only outputs win probability, it has nothing to say about margin
+        # or total points, so this is the spreads/totals equivalent.
+        if scoring_projection:
+            for outcome_name, price_info in spreads_best_prices.items():
+                if outcome_name in spreads_value_outcomes:
+                    continue
+                point = price_info.get("point")
+                if point is None:
+                    continue
+                if outcome_name == home_odds_name:
+                    team_margin = scoring_projection["projected_margin"]
+                elif outcome_name == away_odds_name:
+                    team_margin = -scoring_projection["projected_margin"]
+                else:
+                    continue
+                gap = team_margin + point  # how much the model has this side covering by
+                if gap < scoring_projection["projected_total"] * PREDICTION_LEAN_MIN_GAP_PCT:
+                    continue
+                decimal_odds = price_info["price"]
+                if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
+                    continue
+                selection = _format_selection(outcome_name, point, "spreads")
+                reasoning_parts = [
+                    f"[Model prediction — no confirmed market edge] Points-scored/allowed "
+                    f"projection ({scoring_projection['home_projected']:.0f}-"
+                    f"{scoring_projection['away_projected']:.0f}) has {outcome_name} covering "
+                    f"{selection} by about {gap:.1f} at {price_info['bookmaker']}. No cross-bookmaker "
+                    f"price discrepancy was found here — this is a simple scoring-average model, not "
+                    f"detected market value, and is noisiest early in a season.",
+                ]
+                if outcome_name in (home_odds_name, away_odds_name) and notes:
+                    reasoning_parts.extend(notes)
+                db.insert_tip({
+                    "game_date": game_date,
+                    "game_time_local": game_time_local,
+                    "sport": sport,
+                    "matchup": matchup,
+                    "market": "spreads",
+                    "selection": selection,
+                    "bookmaker": price_info["bookmaker"],
+                    "odds_decimal": decimal_odds,
+                    "model_prob": None,
+                    "market_fair_prob": None,
+                    "edge_pct": None,
+                    "suggested_units": PREDICTION_UNITS,
+                    "tip_type": "prediction",
+                    "reasoning": " ".join(reasoning_parts),
+                })
+                prediction_tips += 1
+                if linked_bet is None:
+                    linked_bet = {
+                        "market": "spreads", "selection": selection,
+                        "bookmaker": price_info["bookmaker"], "odds_decimal": decimal_odds,
+                        "suggested_units": PREDICTION_UNITS, "edge_pct": -1.0,
+                    }
+
+            for outcome_name, price_info in totals_best_prices.items():
+                if outcome_name in totals_value_outcomes or outcome_name.lower() not in ("over", "under"):
+                    continue
+                point = price_info.get("point")
+                if point is None:
+                    continue
+                gap_over = scoring_projection["projected_total"] - point
+                threshold = scoring_projection["projected_total"] * PREDICTION_LEAN_MIN_GAP_PCT
+                wants_over = outcome_name.lower() == "over"
+                gap = gap_over if wants_over else -gap_over
+                if gap < threshold:
+                    continue
+                decimal_odds = price_info["price"]
+                if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
+                    continue
+                selection = _format_selection(outcome_name, point, "totals")
+                reasoning_parts = [
+                    f"[Model prediction — no confirmed market edge] Points-scored/allowed "
+                    f"projection has this game at {scoring_projection['projected_total']:.0f} total "
+                    f"points vs the {point:g} line at {price_info['bookmaker']}. No cross-bookmaker "
+                    f"price discrepancy was found here — this is a simple scoring-average model, not "
+                    f"detected market value, and is noisiest early in a season.",
+                ]
+                if notes:
+                    reasoning_parts.extend(notes)
+                db.insert_tip({
+                    "game_date": game_date,
+                    "game_time_local": game_time_local,
+                    "sport": sport,
+                    "matchup": matchup,
+                    "market": "totals",
+                    "selection": selection,
+                    "bookmaker": price_info["bookmaker"],
+                    "odds_decimal": decimal_odds,
+                    "model_prob": None,
+                    "market_fair_prob": None,
+                    "edge_pct": None,
+                    "suggested_units": PREDICTION_UNITS,
+                    "tip_type": "prediction",
+                    "reasoning": " ".join(reasoning_parts),
+                })
+                prediction_tips += 1
+                if linked_bet is None:
+                    linked_bet = {
+                        "market": "totals", "selection": selection,
+                        "bookmaker": price_info["bookmaker"], "odds_decimal": decimal_odds,
+                        "suggested_units": PREDICTION_UNITS, "edge_pct": -1.0,
                     }
 
         # Always log situational notes as their own Ball Knowledge entry, even

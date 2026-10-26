@@ -70,12 +70,29 @@ function tierClass(tier) {
   return "tier-Lean";
 }
 
+// Mirrors models/edge.py's COMBINED_RATING exactly -- edge tier is the
+// dominant axis (the actual +EV signal), risk is a secondary variance
+// flag baked into the label text itself.
+const COMBINED_RATING = {
+  "Strong|Not Risky": "Elite",
+  "Strong|Neutral": "Strong Value",
+  "Strong|Risky": "High-Upside Swing",
+  "Moderate|Not Risky": "Safe Value",
+  "Moderate|Neutral": "Good Value",
+  "Moderate|Risky": "Speculative Value",
+  "Lean|Not Risky": "Safe Lean",
+  "Lean|Neutral": "Lean Value",
+  "Lean|Risky": "Longshot Lean",
+};
+function combinedRating(tier, risk) {
+  return COMBINED_RATING[`${tier}|${risk}`] || `${tier} / ${risk}`;
+}
+
 function tipCard(t) {
   const hasPrice = t.bookmaker && t.odds_decimal;
   const tier = tierLabel(t.edge_pct);
   const riskEdge = t.risk
-    ? (tier ? `<span class="${tierClass(tier)}">${tier} edge</span> · ` : "") +
-      `<span class="${riskClass(t.risk)}">${t.risk}</span>` +
+    ? `<span class="${tierClass(tier)}">${combinedRating(tier, t.risk)}</span>` +
       (t.edge_pct !== null && t.edge_pct !== undefined ? ` · ${fmtPct(t.edge_pct)}` : "")
     : (t.model_prob !== null && t.model_prob !== undefined ? `Model confidence: <b>${(t.model_prob * 100).toFixed(1)}%</b>` : "");
   return `

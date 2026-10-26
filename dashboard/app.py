@@ -23,7 +23,7 @@ from config import (
 )
 from db import database as db
 from models import conversion_finder, matched_betting, multis
-from models.edge import tier_label
+from models.edge import combined_rating, tier_label
 from models.risk import risk_label
 from tips.generate_tips import ensure_fresh
 from tips.generate_tips import run as run_pipeline
@@ -80,11 +80,9 @@ def _render_one_tip_card(t):
         c1, c2 = st.columns([1, 2])
         c1.metric("Units", f"{t['suggested_units']:g}")
         tier = tier_label(t["edge_pct"])
-        tier_color = TIER_COLOR.get(tier, "gray")
-        risk_color = RISK_COLOR.get(t["risk"], "gray")
-        c2.markdown(
-            f":{tier_color}[**{tier} edge**] · :{risk_color}[{t['risk']}] · {t['edge_pct']:+.1%}"
-        )
+        rating = combined_rating(tier, t["risk"])
+        rating_color = TIER_COLOR.get(tier, "gray")
+        c2.markdown(f":{rating_color}[**{rating}**] · {t['edge_pct']:+.1%}")
         st.caption(t["reasoning"])
 
 

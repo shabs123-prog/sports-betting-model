@@ -112,6 +112,26 @@ confidence — a model can clear the bar on a dozen games in one slate, which
 isn't "a few bets a day" any more — the rest aren't dropped, just tucked
 into an expander.
 
+**Spreads/totals Predictions** (`models/scoring.py`) extend the same idea to
+Line/Handicap markets, which Elo has nothing to say about (it only ever
+outputs a win probability). A simple points-scored/points-allowed average
+per team (built from the exact same ESPN finished-games data Elo already
+trains on — no extra API call) projects a likely margin and total for the
+matchup; when that projection clears the market's posted line by more than
+`PREDICTION_LEAN_MIN_GAP_PCT` (1.5% of the projected total — scales across
+sports rather than a fixed point gap, since NBA totals run ~220 and NFL
+~45), it's logged as a `tip_type="prediction"` lean, same honest "no
+confirmed market edge" framing, same odds-range/unit-size treatment, and
+no UI changes needed (the existing Predictions sections already render any
+market). Requires `MIN_GAMES_FOR_PROJECTION` (5) games played by both teams
+before trusting the average — skipped otherwise, not guessed. Verified the
+scoring model itself against real ESPN results (e.g. correctly favoured
+Detroit Pistons over Philadelphia 76ers, who did win, even though the
+projected margin undershot the actual one) — but the full odds-comparison
+path hasn't been exercised against live data yet, since this shipped while
+the account was at 0/500 API requests for the period; first real daily
+refresh after quota resets is the actual end-to-end test.
+
 ### Line Movement (`line_history` table, This Week tab)
 
 Catching a line before it moves (e.g. a total posted at 192.5 drifting to

@@ -56,3 +56,27 @@ def tier_label(edge: float) -> str:
         if edge >= threshold:
             return label
     return "Marginal"
+
+
+# Edge tier (size of the mispricing) and risk (win-probability band) answer
+# different questions -- how good is the price vs. how likely is it to land
+# -- and showing them as two separate badges left people mentally combining
+# them anyway. This is that combination, done once and shown as a single
+# label. Edge is the dominant axis (it's the actual +EV signal; risk is a
+# secondary variance flag) -- same tier always reads as "better" than a
+# lower tier regardless of risk, and risk only distinguishes within a tier.
+COMBINED_RATING = {
+    ("Strong", "Not Risky"): "Elite",
+    ("Strong", "Neutral"): "Strong Value",
+    ("Strong", "Risky"): "High-Upside Swing",
+    ("Moderate", "Not Risky"): "Safe Value",
+    ("Moderate", "Neutral"): "Good Value",
+    ("Moderate", "Risky"): "Speculative Value",
+    ("Lean", "Not Risky"): "Safe Lean",
+    ("Lean", "Neutral"): "Lean Value",
+    ("Lean", "Risky"): "Longshot Lean",
+}
+
+
+def combined_rating(tier: str, risk: str) -> str:
+    return COMBINED_RATING.get((tier, risk), f"{tier} / {risk}")
