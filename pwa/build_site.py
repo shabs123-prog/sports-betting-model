@@ -19,7 +19,7 @@ from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import DEFAULT_MAX_SINGLE_ODDS, DEFAULT_MIN_SINGLE_ODDS, SPORT_CONFIG
+from config import DEFAULT_MAX_SINGLE_ODDS, DEFAULT_MIN_SINGLE_ODDS, SPORT_CONFIG, USER_BOOKMAKERS
 from db import database as db
 from models import multis
 from models.risk import risk_label
@@ -199,6 +199,7 @@ def main():
         "this_week": build_this_week(),
         "sports": {sport: build_sport(sport, cfg) for sport, cfg in SPORT_CONFIG.items()},
         "results": {sport: build_results(sport, cfg) for sport, cfg in SPORT_CONFIG.items()},
+        "user_bookmakers": sorted(USER_BOOKMAKERS),
     }
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w") as f:

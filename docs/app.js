@@ -390,6 +390,12 @@ function autoGradeBets() {
   if (changed) saveBets(bets);
 }
 
+function bookmakerOptions(selected) {
+  const books = (state.data && state.data.user_bookmakers) || [selected];
+  const list = books.includes(selected) ? books : [selected, ...books];
+  return list.map((b) => `<option value="${escapeHtml(b)}" ${b === selected ? "selected" : ""}>${escapeHtml(b)}</option>`).join("");
+}
+
 function logBetButton(t) {
   if (!(t.bookmaker && t.odds_decimal)) return "";
   if (findPendingBetForTip(t)) {
@@ -404,7 +410,7 @@ function logBetButton(t) {
         <label class="form-label">Units</label>
         <input type="number" class="form-input log-units-input" value="${t.suggested_units || 1}" step="0.25" min="0.25">
         <label class="form-label">App / bookmaker</label>
-        <input type="text" class="form-input log-bookmaker-input" value="${escapeHtml(t.bookmaker)}">
+        <select class="form-input log-bookmaker-input">${bookmakerOptions(t.bookmaker)}</select>
         <button class="log-btn" data-confirm-log="1">Confirm</button>
       </div>`;
   }
