@@ -314,6 +314,7 @@ function logBetFromTip(t, overrides) {
     bookmaker: o.bookmaker || t.bookmaker,
     odds_decimal: o.odds_decimal || t.odds_decimal,
     units: o.units || t.suggested_units || 1,
+    notes: o.notes || "",
     result: "pending",
   });
   saveBets(bets);
@@ -433,6 +434,8 @@ function logBetButton(t) {
         <input type="number" class="form-input log-units-input" value="${t.suggested_units || 1}" step="0.25" min="0.25">
         <label class="form-label">App / bookmaker</label>
         <select class="form-input log-bookmaker-input">${bookmakerOptions(t.bookmaker)}</select>
+        <label class="form-label">Notes (optional)</label>
+        <input type="text" class="form-input log-notes-input" placeholder="Why you took this, anything you want to remember">
         <button class="log-btn" data-confirm-log="1">Confirm</button>
       </div>`;
   }
@@ -454,6 +457,7 @@ function betCard(b) {
       <button class="delete-bet" data-delete-bet="${b.id}" aria-label="Delete">×</button>
       <div class="matchup">${escapeHtml(b.sport.toUpperCase())}: ${escapeHtml(b.matchup)}</div>
       <div class="pick-line"><b>${escapeHtml(marketLabel(b.market))}</b> · ${escapeHtml(b.selection)} @ <b>${fmtOdds(b.odds_decimal)}</b> · ${escapeHtml(b.bookmaker)} · ${fmtUnits(b.units)}u</div>
+      ${b.notes ? `<div class="reasoning">"${escapeHtml(b.notes)}"</div>` : ""}
       ${actions}
     </div>`;
 }
@@ -685,10 +689,12 @@ function init() {
       const odds = parseFloat(formEl.querySelector(".log-odds-input").value);
       const units = parseFloat(formEl.querySelector(".log-units-input").value);
       const bookmaker = formEl.querySelector(".log-bookmaker-input").value.trim();
+      const notes = formEl.querySelector(".log-notes-input").value.trim();
       logBetFromTip(t, {
         odds_decimal: odds > 1 ? odds : undefined,
         units: units > 0 ? units : undefined,
         bookmaker: bookmaker || undefined,
+        notes: notes || undefined,
       });
       editingTipKey = null;
       renderTab(activeTab);
