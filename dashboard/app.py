@@ -59,6 +59,31 @@ def _fmt_when(t) -> str:
     return f"{date_str}, {time_str}" if isinstance(time_str, str) and time_str else date_str
 
 
+def _spread_across_dates(df: pd.DataFrame, count: int) -> pd.DataFrame:
+    """
+    Round-robin by game_date instead of pure top-N by priority -- a date
+    with several strong picks would otherwise crowd every slot and leave
+    real value on later-week dates invisible, even though "catch it early"
+    is the whole point of looking 14 days out. One pick per date per round,
+    cycling through dates in order, until count is reached.
+    """
+    if df.empty:
+        return df
+    remaining_by_date = {
+        d: grp.sort_values("priority", ascending=False).index.tolist()
+        for d, grp in df.groupby("game_date")
+    }
+    dates = sorted(remaining_by_date)
+    picked = []
+    while len(picked) < count and any(remaining_by_date.values()):
+        for d in dates:
+            if remaining_by_date[d]:
+                picked.append(remaining_by_date[d].pop(0))
+                if len(picked) >= count:
+                    break
+    return df.loc[picked]
+
+
 def _render_one_tip_card(t):
     with st.container(border=True):
         st.markdown(f"**{t['matchup']}** · {_fmt_when(t)}")
@@ -309,9 +334,12 @@ with tab_week:
 
         st.divider()
         remaining = within_cap.drop(must_bet.index)
-        recommended = remaining.sort_values("priority", ascending=False).head(RECOMMENDED_COUNT)
+        recommended = _spread_across_dates(remaining, RECOMMENDED_COUNT)
         st.subheader(f"Recommended bets this week ({len(recommended)})")
-        st.caption(f"All within {lo:g}-{hi:g} odds, prioritising Line/Handicap — a short, curated list.")
+        st.caption(
+            f"All within {lo:g}-{hi:g} odds, prioritising Line/Handicap — spread across the week "
+            "so later-week value isn't crowded out by today's picks, not just the single best day."
+        )
         render_value_cards(recommended.to_dict("records"), show_sport_header=True, show_excluded=False)
 
         # Model leans (Predictions): no confirmed market edge, so kept

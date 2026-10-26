@@ -146,7 +146,7 @@ function renderThisWeek() {
 
   html += `<section>
     <h2>Recommended bets this week (${tw.recommended.length})</h2>
-    <p class="caption">All within ${lo}-${hi} odds, prioritising Line/Handicap.</p>`;
+    <p class="caption">All within ${lo}-${hi} odds, spread across the week so later-week value isn't crowded out by today's picks.</p>`;
   html += tw.recommended.length ? tw.recommended.map(tipCard).join("") : `<div class="muted-note">No value bets for this view right now.</div>`;
   html += `</section>`;
 

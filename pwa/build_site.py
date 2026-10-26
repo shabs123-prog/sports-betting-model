@@ -52,6 +52,33 @@ def _priority(t: dict) -> float:
     return is_line_handicap + (t["edge_pct"] or 0)
 
 
+def _spread_across_dates(tips: list[dict], count: int) -> list[dict]:
+    """
+    Round-robin by game_date instead of pure top-N by priority -- a date
+    with several strong picks would otherwise crowd every slot and leave
+    real value on later-week dates invisible, even though "catch it early"
+    is the whole point of looking 14 days out. One pick per date per round,
+    cycling through dates in order, until count is reached. Mirrors
+    dashboard/app.py's _spread_across_dates exactly.
+    """
+    if not tips:
+        return []
+    by_date: dict[str, list[dict]] = {}
+    for t in tips:
+        by_date.setdefault(t["game_date"], []).append(t)
+    for d in by_date:
+        by_date[d].sort(key=_priority, reverse=True)
+    dates = sorted(by_date)
+    picked = []
+    while len(picked) < count and any(by_date.values()):
+        for d in dates:
+            if by_date[d]:
+                picked.append(by_date[d].pop(0))
+                if len(picked) >= count:
+                    break
+    return picked
+
+
 def build_this_week() -> dict:
     lo, hi = _odds_range()
     today = date.today().isoformat()
@@ -98,7 +125,7 @@ def build_this_week() -> dict:
     result["must_bet"] = must_bet
 
     remaining = [t for t in within_cap if t["id"] not in must_bet_ids]
-    recommended = sorted(remaining, key=lambda t: -t["priority"])[:RECOMMENDED_COUNT]
+    recommended = _spread_across_dates(remaining, RECOMMENDED_COUNT)
     recommended_ids = {t["id"] for t in recommended}
     result["recommended"] = recommended
 
