@@ -60,12 +60,14 @@ function tipCard(t) {
         <div class="risk-edge">${riskEdge}</div>
       </div>
       ${t.reasoning ? `<div class="reasoning">${escapeHtml(t.reasoning)}</div>` : ""}
+      ${hasPrice ? `<div class="card-actions">${logBetButton(t)}</div>` : ""}
     </div>`;
 }
 
 function knowledgeCard(t) {
   const linked = t.bookmaker && t.odds_decimal
-    ? `<div class="linked-bet">Linked bet: <b>${escapeHtml(marketLabel(t.market))}</b> · ${escapeHtml(t.selection)} @ <b>${fmtOdds(t.odds_decimal)}</b> · ${escapeHtml(t.bookmaker)} · ${fmtUnits(t.suggested_units)}u</div>`
+    ? `<div class="linked-bet">Linked bet: <b>${escapeHtml(marketLabel(t.market))}</b> · ${escapeHtml(t.selection)} @ <b>${fmtOdds(t.odds_decimal)}</b> · ${escapeHtml(t.bookmaker)} · ${fmtUnits(t.suggested_units)}u</div>
+       <div class="card-actions">${logBetButton(t)}</div>`
     : "";
   return `
     <div class="card">
@@ -233,8 +235,141 @@ function renderHorses() {
   return `<p class="caption">Not wired up to live data yet. Horse racing needs a different data source (Betfair Exchange or Racing Australia, not The Odds API) and a different model — per-runner form/speed-figure probability, not team-vs-team Elo.</p>`;
 }
 
+// ------------------------------------------------------------ My Bets
+// Lives entirely in this browser's localStorage -- no backend, no account,
+// free. Tradeoff: bets logged on your phone stay on your phone (nothing
+// synced to another device, and clearing site data wipes them), which is
+// fine for one person on one device but worth knowing before relying on it.
+const BETS_KEY = "vb_bets_v1";
+
+function loadBets() {
+  try {
+    return JSON.parse(localStorage.getItem(BETS_KEY) || "[]");
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveBets(bets) {
+  try {
+    localStorage.setItem(BETS_KEY, JSON.stringify(bets));
+  } catch (e) {
+    // Storage unavailable (private browsing, full, disabled) -- logging
+    // just won't persist past this page view rather than throwing.
+  }
+}
+
+function tipKey(t) {
+  return [t.sport, t.matchup, t.market, t.selection, t.bookmaker].join("|");
+}
+
+function findPendingBetForTip(t) {
+  const key = tipKey(t);
+  return loadBets().find((b) => b.key === key && b.result === "pending");
+}
+
+// base64 round-trip (not raw JSON) so the encoded tip can sit safely inside
+// an HTML attribute without fighting quote-escaping.
+function encodeTip(t) {
+  return btoa(unescape(encodeURIComponent(JSON.stringify(t))));
+}
+function decodeTip(encoded) {
+  return JSON.parse(decodeURIComponent(escape(atob(encoded))));
+}
+
+function logBetFromTip(t) {
+  const bets = loadBets();
+  bets.unshift({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    ts: new Date().toISOString(),
+    key: tipKey(t),
+    sport: t.sport,
+    matchup: t.matchup,
+    market: t.market,
+    selection: t.selection,
+    bookmaker: t.bookmaker,
+    odds_decimal: t.odds_decimal,
+    units: t.suggested_units || 1,
+    result: "pending",
+  });
+  saveBets(bets);
+}
+
+function settleBet(id, result) {
+  const bets = loadBets();
+  const bet = bets.find((b) => b.id === id);
+  if (!bet) return;
+  bet.result = result;
+  if (result === "win") bet.profit_units = bet.units * (bet.odds_decimal - 1);
+  else if (result === "loss") bet.profit_units = -bet.units;
+  else bet.profit_units = 0;
+  saveBets(bets);
+}
+
+function deleteBet(id) {
+  saveBets(loadBets().filter((b) => b.id !== id));
+}
+
+function logBetButton(t) {
+  if (!(t.bookmaker && t.odds_decimal)) return "";
+  if (findPendingBetForTip(t)) {
+    return `<button class="log-btn logged" disabled>✓ Logged</button>`;
+  }
+  return `<button class="log-btn" data-log-tip="${encodeTip(t)}">+ Log bet</button>`;
+}
+
+function betCard(b) {
+  const actions = b.result === "pending"
+    ? `<div class="bet-actions">
+        <button class="bet-btn win" data-settle="${b.id}" data-result="win">Win</button>
+        <button class="bet-btn loss" data-settle="${b.id}" data-result="loss">Loss</button>
+        <button class="bet-btn push" data-settle="${b.id}" data-result="push">Push</button>
+      </div>`
+    : `<div class="bet-result-tag ${escapeHtml(b.result)}">${escapeHtml(b.result.toUpperCase())}${
+        b.profit_units !== undefined ? ` · ${b.profit_units >= 0 ? "+" : ""}${b.profit_units.toFixed(2)}u` : ""
+      }</div>`;
+  return `
+    <div class="card">
+      <button class="delete-bet" data-delete-bet="${b.id}" aria-label="Delete">×</button>
+      <div class="matchup">${escapeHtml(b.sport.toUpperCase())}: ${escapeHtml(b.matchup)}</div>
+      <div class="pick-line"><b>${escapeHtml(marketLabel(b.market))}</b> · ${escapeHtml(b.selection)} @ <b>${fmtOdds(b.odds_decimal)}</b> · ${escapeHtml(b.bookmaker)} · ${fmtUnits(b.units)}u</div>
+      ${actions}
+    </div>`;
+}
+
+function renderMyBets() {
+  const bets = loadBets();
+  let html = `<p class="caption">Lives only on this device — tap "+ Log bet" on any tip to add it here. Nothing synced anywhere.</p>`;
+
+  if (!bets.length) {
+    html += `<div class="muted-note">No bets logged yet.</div>`;
+    return html;
+  }
+
+  const pending = bets.filter((b) => b.result === "pending");
+  const settled = bets.filter((b) => b.result !== "pending");
+  const netUnits = settled.reduce((sum, b) => sum + (b.profit_units || 0), 0);
+  const wins = settled.filter((b) => b.result === "win").length;
+  const winRate = settled.length ? ((wins / settled.length) * 100).toFixed(1) : "0.0";
+
+  html += `<div class="bets-summary">
+    <div><span class="v">${settled.length}</span><span class="l">Settled</span></div>
+    <div><span class="v">${winRate}%</span><span class="l">Win rate</span></div>
+    <div><span class="v">${netUnits >= 0 ? "+" : ""}${netUnits.toFixed(2)}u</span><span class="l">Net units</span></div>
+  </div>`;
+
+  if (pending.length) {
+    html += `<section><h2>Pending (${pending.length})</h2>${pending.map(betCard).join("")}</section>`;
+  }
+  if (settled.length) {
+    html += `<section><h2>Settled (${settled.length})</h2>${settled.map(betCard).join("")}</section>`;
+  }
+  return html;
+}
+
 const TAB_RENDERERS = {
   week: renderThisWeek,
+  mybets: renderMyBets,
   horses: renderHorses,
 };
 SPORT_ORDER.forEach((s) => { TAB_RENDERERS[s] = () => renderSport(s); });
@@ -251,7 +386,7 @@ function renderTab(tab) {
 
 function buildTabBar() {
   const nav = document.getElementById("tabbar");
-  const tabs = [["week", "This Week"], ...SPORT_ORDER.map((s) => [s, s.toUpperCase()]), ["horses", "Horses"]];
+  const tabs = [["week", "This Week"], ...SPORT_ORDER.map((s) => [s, s.toUpperCase()]), ["horses", "Horses"], ["mybets", "My Bets"]];
   nav.innerHTML = tabs.map(([id, label]) => `<button data-tab="${id}">${label}</button>`).join("");
   nav.querySelectorAll("button").forEach((btn) => {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
@@ -301,6 +436,39 @@ function init() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") loadData({ silent: true });
   });
+
+  // One delegated listener handles every button added across renders --
+  // simpler and cheaper than rebinding handlers each time renderTab() runs.
+  document.getElementById("content").addEventListener("click", (e) => {
+    const logBtn = e.target.closest("[data-log-tip]");
+    if (logBtn) {
+      logBetFromTip(decodeTip(logBtn.dataset.logTip));
+      renderTab(activeTab);
+      return;
+    }
+    const settleBtn = e.target.closest("[data-settle]");
+    if (settleBtn) {
+      settleBet(settleBtn.dataset.settle, settleBtn.dataset.result);
+      renderTab(activeTab);
+      return;
+    }
+    const delBtn = e.target.closest("[data-delete-bet]");
+    if (delBtn) {
+      deleteBet(delBtn.dataset.deleteBet);
+      renderTab(activeTab);
+    }
+  });
+
+  const refreshBtn = document.getElementById("refresh-btn");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = "…";
+      await loadData();
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "↻";
+    });
+  }
 }
 
 document.addEventListener("DOMContentLoaded", init);
