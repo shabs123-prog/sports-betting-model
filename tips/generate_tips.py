@@ -22,6 +22,7 @@ from config import (
     SECONDARY_SHARP_REFERENCE_BOOKMAKER,
     SHARP_REFERENCE_BOOKMAKER,
     SPORT_CONFIG,
+    TERTIARY_SHARP_REFERENCE_BOOKMAKER,
     USER_BOOKMAKERS,
 )
 from data import espn, odds_api
@@ -302,15 +303,20 @@ def run(sport: str = "nba", log=print) -> dict:
             au_fair_probs = edge.consensus_fair_probs(books)
 
             # Sharp reference chain: Pinnacle (lowest margin, industry
-            # standard benchmark) first, then Betfair Exchange (two-sided
-            # market, sharper than a fixed-odds book even though it's AU)
-            # when Pinnacle doesn't cover this market/point. A cluster of
-            # recreational AU books mostly just copies each other, which can
-            # converge tightly on itself without being especially accurate --
-            # only fall all the way back to that average if neither sharp
-            # source quotes the exact same point as the AU consensus.
+            # standard benchmark) first, then Betfair Exchange, then
+            # Matchbook (both two-sided markets, sharper than a fixed-odds
+            # book even though AU/EU-based) when Pinnacle doesn't cover this
+            # market/point. A cluster of recreational AU books mostly just
+            # copies each other, which can converge tightly on itself
+            # without being especially accurate -- only fall all the way
+            # back to that average if none of the three sharp sources quote
+            # the exact same point as the AU consensus.
             sharp_fair_probs, sharp_source = {}, None
-            for ref_bookmaker in (SHARP_REFERENCE_BOOKMAKER, SECONDARY_SHARP_REFERENCE_BOOKMAKER):
+            for ref_bookmaker in (
+                SHARP_REFERENCE_BOOKMAKER,
+                SECONDARY_SHARP_REFERENCE_BOOKMAKER,
+                TERTIARY_SHARP_REFERENCE_BOOKMAKER,
+            ):
                 prices = odds_api.single_bookmaker_prices(event, market, ref_bookmaker, outcome_points)
                 if len(prices) >= 2:
                     sharp_fair_probs = devig_book(prices)

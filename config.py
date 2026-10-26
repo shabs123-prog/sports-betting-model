@@ -75,6 +75,14 @@ SHARP_REFERENCE_BOOKMAKER = "Pinnacle"
 # it sharper than a fixed-odds recreational book even though it's AU-based --
 # used as a second sharp opinion when Pinnacle doesn't cover a market/point.
 SECONDARY_SHARP_REFERENCE_BOOKMAKER = "Betfair"
+# Matchbook is the other two-sided exchange in the 'eu' region pull we're
+# already paying for (same reasoning as Betfair, just smaller/less liquid --
+# hence third in line, not second). Checked live: currently Pinnacle alone
+# already covers ~90% of open tips and Betfair covers the rest, so this
+# mostly matters as a safety net for whatever edge case neither covers,
+# not a guaranteed source of bigger edges -- genuinely large (5%+) edges
+# are rare by nature of markets being efficient, not a methodology gap.
+TERTIARY_SHARP_REFERENCE_BOOKMAKER = "Matchbook"
 
 # Bookmakers you actually hold accounts with. "Best price" recommendations
 # are restricted to this list so every tip is one you can actually place --
