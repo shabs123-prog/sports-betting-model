@@ -173,6 +173,23 @@ def get_all_tips(limit: int = 500):
         return [dict(row) for row in rows]
 
 
+def get_distinct_matchup_teams(sport: str) -> set[str]:
+    """
+    Every team name that's appeared in this sport's tip matchups (The Odds
+    API's naming), across all history -- used to build an ESPN-name <->
+    Odds-API-name mapping for auto-grading logged bets against ESPN results
+    (see pwa/build_site.py), without needing a fresh pipeline run.
+    """
+    with get_conn() as conn:
+        rows = conn.execute("SELECT DISTINCT matchup FROM tips WHERE sport = ?", (sport,)).fetchall()
+    teams = set()
+    for row in rows:
+        parts = row["matchup"].split(" @ ")
+        if len(parts) == 2:
+            teams.update(p.strip() for p in parts)
+    return teams
+
+
 def insert_bet(bet: dict) -> int:
     with get_conn() as conn:
         cur = conn.execute(

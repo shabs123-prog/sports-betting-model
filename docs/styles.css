@@ -183,6 +183,16 @@ select.form-input {
   opacity: 0.8;
 }
 
+.log-form {
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.log-form .form-label { margin: 10px 0 4px; }
+.log-form .form-label:first-child { margin-top: 0; }
+.log-form .log-btn { margin-top: 12px; }
+
 .card { position: relative; }
 .delete-bet {
   position: absolute;

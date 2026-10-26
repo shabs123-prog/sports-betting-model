@@ -58,8 +58,9 @@ def _load_staking_settings() -> dict:
 # artifact, not the kind of "I'm confident about this" a Strong tier is
 # meant to signal within the preferred odds range. Capped flat regardless
 # of tier for anything priced above max_single_odds, per explicit feedback:
-# "not gonna do high unit bets on high odd picks."
-LONGSHOT_UNIT_CAP = 1.0
+# "not gonna do high unit bets on high odd picks." Matches the Lean tier
+# default (0.75) -- a longshot shouldn't outsize the lowest-confidence tier.
+LONGSHOT_UNIT_CAP = 0.75
 
 
 def _tier_units(tier: str, decimal_odds: float, settings: dict) -> float:
@@ -79,7 +80,9 @@ def _tier_units(tier: str, decimal_odds: float, settings: dict) -> float:
 # model of the market in the first place.
 PREDICTION_ELIGIBLE_SPORTS = {"nba", "nbl", "nfl", "afl"}
 PREDICTION_MIN_MODEL_PROB = 0.55
-PREDICTION_UNITS = 1.0
+# No confirmed market edge at all (lower confidence than even a Lean value
+# tip, which has a real-if-small detected edge) -- shouldn't out-stake Lean.
+PREDICTION_UNITS = 0.75
 
 
 def _espn_season_years(sport: str) -> list[int]:
@@ -510,7 +513,8 @@ def run(sport: str = "nba", log=print) -> dict:
                     "bookmaker": ref_price["bookmaker"],
                     "odds_decimal": ref_price["price"],
                     "suggested_units": (
-                        LONGSHOT_UNIT_CAP if ref_price["price"] > settings["max_single_odds"] else 1.0
+                        LONGSHOT_UNIT_CAP if ref_price["price"] > settings["max_single_odds"]
+                        else settings["tier_units"]["Lean"]
                     ),
                 }
                 reference_price_used = True

@@ -34,7 +34,11 @@ DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.0075"))
 # confident the edge is. Each is capped by max_units_per_bet regardless.
 DEFAULT_TIER_UNITS_STRONG = float(_get_secret("TIER_UNITS_STRONG", "2.5"))
 DEFAULT_TIER_UNITS_MODERATE = float(_get_secret("TIER_UNITS_MODERATE", "1.75"))
-DEFAULT_TIER_UNITS_LEAN = float(_get_secret("TIER_UNITS_LEAN", "1.0"))
+# Explicit feedback: usually prefers 1-2u for most bets (Moderate=1.75 already
+# fits), 2.5-3u only for very confident/big-edge picks (Strong=2.5 already
+# fits) -- 0.75 is fine for Lean specifically ("0.5 and 0.75 i dont mind"),
+# since that's the lowest-confidence tier and should sit below the 1-2u norm.
+DEFAULT_TIER_UNITS_LEAN = float(_get_secret("TIER_UNITS_LEAN", "0.75"))
 
 # Hard range on single-bet odds shown in the main "Value Bets"/"Predictions"
 # views -- not a soft discount zone, an actual floor and ceiling. Tips

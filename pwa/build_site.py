@@ -23,11 +23,14 @@ from config import DEFAULT_MAX_SINGLE_ODDS, DEFAULT_MIN_SINGLE_ODDS, SPORT_CONFI
 from db import database as db
 from models import multis
 from models.risk import risk_label
+from models.team_names import build_nickname_index, resolve
+from tips.generate_tips import _finished_games_for_elo
 
 WEEK_AHEAD_DAYS = 14
 RECOMMENDED_COUNT = 5
 MUST_BET_MIN_EDGE = 0.015
 MUST_BET_COUNT = 4
+RESULTS_LOOKBACK_DAYS = 21  # generous window for grading a logged bet against
 MODEL_LEANS_COUNT = 6  # across all sports combined -- the volume lever when value-tip edge is thin this week
 MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line", "btts": "BTTS"}
 
@@ -110,6 +113,51 @@ def build_this_week() -> dict:
     return result
 
 
+def build_results(sport: str, cfg: dict) -> list[dict]:
+    """
+    Recent finished games with final scores, for the PWA to auto-grade
+    logged bets (My Bets) against -- entirely free (ESPN's public API, same
+    source Elo already uses, no Odds API quota involved), and doesn't need
+    a fresh odds pipeline run. The tricky part: bets are logged using The
+    Odds API's team names (whatever a tip's matchup string says), but ESPN
+    uses its own naming that doesn't always agree ("LA Clippers" vs
+    "Los Angeles Clippers") -- reuses models/team_names.resolve() (same
+    logic Elo training uses) built from every team name this sport's tips
+    have ever used, so results ship under Odds-API-style names and a
+    client-side exact string match on "matchup" is reliable rather than
+    needing fuzzy matching in JS.
+    """
+    if not cfg.get("has_history"):
+        return []
+    games = _finished_games_for_elo(sport, cfg)
+    cutoff = (date.today() - timedelta(days=RESULTS_LOOKBACK_DAYS)).isoformat()
+    recent = [g for g in games if g["date"] >= cutoff]
+    if not recent:
+        return []
+
+    espn_names = list({g["home_team"] for g in recent} | {g["away_team"] for g in recent})
+    nickname_idx = build_nickname_index(espn_names)
+    espn_to_odds = {}
+    for odds_name in db.get_distinct_matchup_teams(sport):
+        espn_name = resolve(odds_name, espn_names, nickname_idx)
+        if espn_name:
+            espn_to_odds[espn_name] = odds_name
+
+    results = []
+    for g in recent:
+        home = espn_to_odds.get(g["home_team"], g["home_team"])
+        away = espn_to_odds.get(g["away_team"], g["away_team"])
+        results.append({
+            "matchup": f"{away} @ {home}",
+            "date": g["date"],
+            "home_team": home,
+            "away_team": away,
+            "home_score": g["home_score"],
+            "away_score": g["away_score"],
+        })
+    return results
+
+
 def build_sport(sport: str, cfg: dict) -> dict:
     lo, hi = _odds_range()
     today = date.today().isoformat()
@@ -150,6 +198,7 @@ def main():
         "market_label": MARKET_LABEL,
         "this_week": build_this_week(),
         "sports": {sport: build_sport(sport, cfg) for sport, cfg in SPORT_CONFIG.items()},
+        "results": {sport: build_results(sport, cfg) for sport, cfg in SPORT_CONFIG.items()},
     }
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w") as f:

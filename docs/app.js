@@ -4,6 +4,7 @@ const MAX_PREDICTIONS_PER_SPORT = 4;
 const SPORT_ORDER = ["nba", "epl", "nbl", "nfl", "nrl", "afl", "bbl"];
 
 let state = { data: null };
+let editingTipKey = null; // which card (by tipKey) currently has its log-bet form open
 
 function escapeHtml(s) {
   if (s === null || s === undefined) return "";
@@ -277,7 +278,8 @@ function decodeTip(encoded) {
   return JSON.parse(decodeURIComponent(escape(atob(encoded))));
 }
 
-function logBetFromTip(t) {
+function logBetFromTip(t, overrides) {
+  const o = overrides || {};
   const bets = loadBets();
   bets.unshift({
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
@@ -287,15 +289,15 @@ function logBetFromTip(t) {
     matchup: t.matchup,
     market: t.market,
     selection: t.selection,
-    bookmaker: t.bookmaker,
-    odds_decimal: t.odds_decimal,
-    units: t.suggested_units || 1,
+    bookmaker: o.bookmaker || t.bookmaker,
+    odds_decimal: o.odds_decimal || t.odds_decimal,
+    units: o.units || t.suggested_units || 1,
     result: "pending",
   });
   saveBets(bets);
 }
 
-function settleBet(id, result) {
+function settleBet(id, result, autoGraded) {
   const bets = loadBets();
   const bet = bets.find((b) => b.id === id);
   if (!bet) return;
@@ -303,6 +305,7 @@ function settleBet(id, result) {
   if (result === "win") bet.profit_units = bet.units * (bet.odds_decimal - 1);
   else if (result === "loss") bet.profit_units = -bet.units;
   else bet.profit_units = 0;
+  bet.auto_graded = !!autoGraded;
   saveBets(bets);
 }
 
@@ -310,12 +313,102 @@ function deleteBet(id) {
   saveBets(loadBets().filter((b) => b.id !== id));
 }
 
+// ---- Auto-grading: match a pending bet against free ESPN results
+// (state.data.results, built server-side in pwa/build_site.py -- no API
+// quota involved) and settle it automatically. Only grades when the
+// matchup string matches exactly and the market/selection parse cleanly;
+// anything ambiguous is left pending for the manual Win/Loss/Push buttons
+// rather than risk a wrong auto-grade.
+function parseSelection(selection) {
+  const m = selection.match(/^(.*)\s([+-]?\d+(?:\.\d+)?)$/);
+  if (m) return { name: m[1], point: parseFloat(m[2]) };
+  return { name: selection, point: null };
+}
+
+function gradeBet(bet, result) {
+  const { name, point } = parseSelection(bet.selection);
+  const isHome = name === result.home_team;
+  const isAway = name === result.away_team;
+
+  if (bet.market === "h2h") {
+    if (name.toLowerCase() === "draw") {
+      return result.home_score === result.away_score ? "push" : "loss";
+    }
+    if (!isHome && !isAway) return null;
+    const mine = isHome ? result.home_score : result.away_score;
+    const theirs = isHome ? result.away_score : result.home_score;
+    if (mine === theirs) return "push";
+    return mine > theirs ? "win" : "loss";
+  }
+
+  if (bet.market === "spreads") {
+    if ((!isHome && !isAway) || point === null) return null;
+    const mine = isHome ? result.home_score : result.away_score;
+    const theirs = isHome ? result.away_score : result.home_score;
+    const margin = mine - theirs + point;
+    if (margin === 0) return "push";
+    return margin > 0 ? "win" : "loss";
+  }
+
+  if (bet.market === "totals") {
+    if (point === null) return null;
+    const total = result.home_score + result.away_score;
+    if (total === point) return "push";
+    const side = name.toLowerCase();
+    if (side === "over") return total > point ? "win" : "loss";
+    if (side === "under") return total < point ? "win" : "loss";
+    return null;
+  }
+
+  if (bet.market === "btts") {
+    const bothScored = result.home_score > 0 && result.away_score > 0;
+    const wantsYes = name.toLowerCase() === "yes";
+    return wantsYes === bothScored ? "win" : "loss";
+  }
+
+  return null;
+}
+
+function autoGradeBets() {
+  const resultsBySport = (state.data && state.data.results) || {};
+  const bets = loadBets();
+  let changed = false;
+  for (const bet of bets) {
+    if (bet.result !== "pending") continue;
+    const sportResults = resultsBySport[bet.sport] || [];
+    const match = sportResults.find((r) => r.matchup === bet.matchup);
+    if (!match) continue;
+    const outcome = gradeBet(bet, match);
+    if (!outcome) continue;
+    bet.result = outcome;
+    if (outcome === "win") bet.profit_units = bet.units * (bet.odds_decimal - 1);
+    else if (outcome === "loss") bet.profit_units = -bet.units;
+    else bet.profit_units = 0;
+    bet.auto_graded = true;
+    changed = true;
+  }
+  if (changed) saveBets(bets);
+}
+
 function logBetButton(t) {
   if (!(t.bookmaker && t.odds_decimal)) return "";
   if (findPendingBetForTip(t)) {
     return `<button class="log-btn logged" disabled>✓ Logged</button>`;
   }
-  return `<button class="log-btn" data-log-tip="${encodeTip(t)}">+ Log bet</button>`;
+  const key = tipKey(t);
+  if (editingTipKey === key) {
+    return `
+      <div class="log-form" data-tip="${encodeTip(t)}">
+        <label class="form-label">Odds you got</label>
+        <input type="number" class="form-input log-odds-input" value="${t.odds_decimal}" step="0.01" min="1.01">
+        <label class="form-label">Units</label>
+        <input type="number" class="form-input log-units-input" value="${t.suggested_units || 1}" step="0.25" min="0.25">
+        <label class="form-label">App / bookmaker</label>
+        <input type="text" class="form-input log-bookmaker-input" value="${escapeHtml(t.bookmaker)}">
+        <button class="log-btn" data-confirm-log="1">Confirm</button>
+      </div>`;
+  }
+  return `<button class="log-btn" data-edit-log="${encodeTip(t)}">+ Log bet</button>`;
 }
 
 function betCard(b) {
@@ -327,7 +420,7 @@ function betCard(b) {
       </div>`
     : `<div class="bet-result-tag ${escapeHtml(b.result)}">${escapeHtml(b.result.toUpperCase())}${
         b.profit_units !== undefined ? ` · ${b.profit_units >= 0 ? "+" : ""}${b.profit_units.toFixed(2)}u` : ""
-      }</div>`;
+      }${b.auto_graded ? ` · auto` : ""}</div>`;
   return `
     <div class="card">
       <button class="delete-bet" data-delete-bet="${b.id}" aria-label="Delete">×</button>
@@ -338,8 +431,9 @@ function betCard(b) {
 }
 
 function renderMyBets() {
+  autoGradeBets();
   const bets = loadBets();
-  let html = `<p class="caption">Lives only on this device — tap "+ Log bet" on any tip to add it here. Nothing synced anywhere.</p>`;
+  let html = `<p class="caption">Lives only on this device — tap "+ Log bet" on any tip to add it here, nothing synced anywhere. Settles itself once a game finishes (marked "auto") using free public results — if a bet doesn't auto-settle (e.g. it's not matched yet), use Win/Loss/Push yourself.</p>`;
 
   if (!bets.length) {
     html += `<div class="muted-note">No bets logged yet.</div>`;
@@ -550,15 +644,31 @@ function init() {
   // One delegated listener handles every button added across renders --
   // simpler and cheaper than rebinding handlers each time renderTab() runs.
   document.getElementById("content").addEventListener("click", (e) => {
-    const logBtn = e.target.closest("[data-log-tip]");
-    if (logBtn) {
-      logBetFromTip(decodeTip(logBtn.dataset.logTip));
+    const editBtn = e.target.closest("[data-edit-log]");
+    if (editBtn) {
+      editingTipKey = tipKey(decodeTip(editBtn.dataset.editLog));
+      renderTab(activeTab);
+      return;
+    }
+    const confirmBtn = e.target.closest("[data-confirm-log]");
+    if (confirmBtn) {
+      const formEl = confirmBtn.closest("[data-tip]");
+      const t = decodeTip(formEl.dataset.tip);
+      const odds = parseFloat(formEl.querySelector(".log-odds-input").value);
+      const units = parseFloat(formEl.querySelector(".log-units-input").value);
+      const bookmaker = formEl.querySelector(".log-bookmaker-input").value.trim();
+      logBetFromTip(t, {
+        odds_decimal: odds > 1 ? odds : undefined,
+        units: units > 0 ? units : undefined,
+        bookmaker: bookmaker || undefined,
+      });
+      editingTipKey = null;
       renderTab(activeTab);
       return;
     }
     const settleBtn = e.target.closest("[data-settle]");
     if (settleBtn) {
-      settleBet(settleBtn.dataset.settle, settleBtn.dataset.result);
+      settleBet(settleBtn.dataset.settle, settleBtn.dataset.result, false);
       renderTab(activeTab);
       return;
     }
