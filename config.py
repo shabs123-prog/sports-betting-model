@@ -147,6 +147,10 @@ SPORT_CONFIG = {
         "espn_league": "nfl",
         "markets": ["h2h", "spreads", "totals"],
         "auto_refresh": True,
+        # Doesn't cost any extra API calls either way -- notes are built
+        # from data already pulled for Value/Predictions, same as every
+        # other sport. This is purely "don't show it," per explicit ask.
+        "show_knowledge": False,
     },
     # NRL is off-season for part of the year -- that's not a bug, the
     # pipeline just returns 0 events until the season starts. Flip

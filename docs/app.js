@@ -171,10 +171,6 @@ function renderThisWeek() {
       ${comboGroup(tw.sgms)}</section>`;
   }
 
-  if (tw.everything_else.length) {
-    html += `<section>${expander(`Everything else this week (${tw.everything_else.length})`, tw.everything_else.map(tipCard).join(""))}</section>`;
-  }
-
   // Line Movement goes last -- supplementary context (and often just "check
   // back in a few days" while history cold-starts), so it shouldn't push
   // the actually-actionable lists above further down the screen.
@@ -203,14 +199,9 @@ function renderSport(sport) {
   }
 
   html += `<section><h2>Value Bets</h2>`;
-  if (!s.value_in_range.length) {
-    html += `<div class="muted-note">No value bets in the ${lo}-${hi} odds range for this view right now.</div>`;
-  } else {
-    html += s.value_in_range.map(tipCard).join("");
-  }
-  if (s.value_outside_range.length) {
-    html += expander(`Outside ${lo}-${hi} odds, not shown by default (${s.value_outside_range.length})`, s.value_outside_range.map(tipCard).join(""));
-  }
+  html += s.value_in_range.length
+    ? s.value_in_range.map(tipCard).join("")
+    : `<div class="muted-note">No value bets in the ${lo}-${hi} odds range for this view right now.</div>`;
   html += `</section>`;
 
   if (s.has_history) {
@@ -225,9 +216,11 @@ function renderSport(sport) {
     }
     html += `</section>`;
 
-    html += `<section><h2>Ball Knowledge</h2>`;
-    html += s.knowledge.length ? s.knowledge.map(knowledgeCard).join("") : `<div class="muted-note">No situational notes for this view right now.</div>`;
-    html += `</section>`;
+    if (s.show_knowledge) {
+      html += `<section><h2>Ball Knowledge</h2>`;
+      html += s.knowledge.length ? s.knowledge.map(knowledgeCard).join("") : `<div class="muted-note">No situational notes for this view right now.</div>`;
+      html += `</section>`;
+    }
   }
 
   return html || `<div class="muted-note">Nothing here right now.</div>`;

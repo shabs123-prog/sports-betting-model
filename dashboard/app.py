@@ -212,7 +212,7 @@ def render_sport_tab(sport: str):
 
     st.subheader("Value Bets")
     value_tips = db.get_tips_in_range(today_str, end_str, tip_type="value", sport=sport)
-    render_value_cards(value_tips)
+    render_value_cards(value_tips, show_excluded=False)
 
     if cfg["has_history"]:
         st.divider()
@@ -221,10 +221,11 @@ def render_sport_tab(sport: str):
         prediction_tips = db.get_tips_in_range(today_str, end_str, tip_type="prediction", sport=sport)
         render_prediction_cards(prediction_tips)
 
-        st.divider()
-        st.subheader("Ball Knowledge")
-        knowledge_tips = db.get_tips_in_range(today_str, end_str, tip_type="knowledge", sport=sport)
-        render_knowledge_cards(knowledge_tips)
+        if cfg.get("show_knowledge", True):
+            st.divider()
+            st.subheader("Ball Knowledge")
+            knowledge_tips = db.get_tips_in_range(today_str, end_str, tip_type="knowledge", sport=sport)
+            render_knowledge_cards(knowledge_tips)
 
 
 # ---------------------------------------------------------------- Daily auto-refresh
@@ -386,11 +387,6 @@ with tab_week:
                 "shown is a rough estimate, not a verified number like the cross-game multis above."
             )
             _render_combo_group(week_sgms)
-
-        rest = df.drop(must_bet.index).drop(recommended.index)
-        if not rest.empty:
-            with st.expander(f"Everything else this week ({len(rest)})"):
-                render_value_cards(rest.to_dict("records"), show_sport_header=True)
     else:
         st.info("No value tips for the week yet — refresh sports from their own tabs.")
 

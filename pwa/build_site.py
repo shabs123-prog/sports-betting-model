@@ -122,11 +122,13 @@ def build_sport(sport: str, cfg: dict) -> dict:
     predictions, knowledge = [], []
     if cfg["has_history"]:
         predictions = db.get_tips_in_range(today, end, tip_type="prediction", sport=sport)
-        knowledge = db.get_tips_in_range(today, end, tip_type="knowledge", sport=sport)
+        if cfg.get("show_knowledge", True):
+            knowledge = db.get_tips_in_range(today, end, tip_type="knowledge", sport=sport)
 
     return {
         "has_history": cfg["has_history"],
         "auto_refresh": cfg.get("auto_refresh", False),
+        "show_knowledge": cfg.get("show_knowledge", True),
         "value_in_range": in_range,
         "value_outside_range": out_range,
         "predictions": predictions,
