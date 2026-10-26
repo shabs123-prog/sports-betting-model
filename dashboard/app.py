@@ -263,7 +263,12 @@ with tab_week:
     )
 
     today_str = date.today().isoformat()
-    week_end_str = (date.today() + timedelta(days=7)).isoformat()
+    # WEEK_AHEAD_DAYS, not 7 -- Line/Handicap/Totals value routinely posts
+    # days to a week+ before kickoff (that's literally the "catch it at
+    # 192.5 before it drifts to 190.5" ask), so "This Week" has to look as
+    # far out as the per-sport tabs do or it'd find the value today but
+    # drop it from Must-Bet/Recommended for being "too far away."
+    week_end_str = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
     week_tips = db.get_tips_in_range(today_str, week_end_str, tip_type="value")
 
     if week_tips:
@@ -409,9 +414,7 @@ with tab_week:
         "over time, not just a single snapshot. Needs a few days of history before anything "
         "shows up here; empty at first means it just started tracking, not that it's broken."
     )
-    today_str_lm = date.today().isoformat()
-    week_end_str_lm = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
-    moved_lines = db.get_moved_lines(today_str_lm, week_end_str_lm)
+    moved_lines = db.get_moved_lines(today_str, week_end_str)
     if not moved_lines:
         st.info("No line has 2+ days of tracked history yet — check back in a few days.")
     else:

@@ -56,11 +56,15 @@ def _priority(t: dict) -> float:
 def build_this_week() -> dict:
     lo, hi = _odds_range()
     today = date.today().isoformat()
-    week_end = (date.today() + timedelta(days=7)).isoformat()
+    # WEEK_AHEAD_DAYS, not 7 -- Line/Handicap/Totals value routinely posts
+    # days to a week+ before kickoff (catching it at 192.5 before it drifts
+    # to 190.5), so this has to look as far out as the per-sport tabs do or
+    # it'd find the value today but drop it from Must-Bet/Recommended for
+    # being "too far away."
+    week_end = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
     week_tips = _with_risk(db.get_tips_in_range(today, week_end, tip_type="value"))
 
-    week_end_lm = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
-    moved = db.get_moved_lines(today, week_end_lm)
+    moved = db.get_moved_lines(today, week_end)
 
     def _movement_size(m):
         first, latest = m["first"], m["latest"]
