@@ -1,13 +1,20 @@
 name: Daily tips refresh
 
 # Runs the pipeline before you'd realistically check your phone, and commits
-# the refreshed tips.db back to the repo. Streamlit Community Cloud
-# auto-redeploys on every push to main, so by the time you open the app the
-# data's already there -- no first-load wait on your end.
+# the refreshed tips.db + docs/data.json back to the repo. Streamlit
+# Community Cloud auto-redeploys on every push to main (for the Bet
+# Tracker/Settings dashboard), and GitHub Pages serves docs/ straight from
+# the repo (for the installable PWA) -- so by the time you open either, the
+# data's already there, no first-load wait on your end.
 #
 # Needs one repo secret set first: Settings -> Secrets and variables ->
 # Actions -> New repository secret: ODDS_API_KEY (same value as your local
 # .env). Results-history data comes from ESPN's public API, no key needed.
+#
+# Which sports get refreshed here isn't hardcoded -- scripts/run_auto_refresh.py
+# reads config.SPORT_CONFIG's auto_refresh flag, same as the dashboard, so
+# flipping a sport on there (e.g. once NRL/AFL/BBL are back in season) is
+# the only change needed, no workflow edit required.
 
 on:
   schedule:
@@ -26,20 +33,18 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Refresh NBA
-        run: python -m scripts.run_daily nba
+      - name: Refresh all auto_refresh sports
+        run: python -m scripts.run_auto_refresh
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
 
-      - name: Refresh EPL
-        run: python -m scripts.run_daily epl
-        env:
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+      - name: Build PWA site data
+        run: python -m pwa.build_site
 
-      - name: Commit refreshed tips.db
+      - name: Commit refreshed tips.db + PWA data
         run: |
           git config user.name "tips-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add -f tips.db
+          git add -f tips.db docs/data.json
           git diff --staged --quiet || git commit -m "Daily tips refresh $(date -u +%F)"
           git push

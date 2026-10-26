@@ -242,6 +242,7 @@ RECOMMENDED_COUNT = 5  # roughly what a "3-4 bets a week" cadence looks like wit
 BIG_VALUE_EDGE_BAR = 0.03  # Strong-tier edge -- only flag as a special alert, not every week
 MUST_BET_MIN_EDGE = 0.015  # Moderate tier or better
 MUST_BET_COUNT = 4  # "3-4 bets a week" -- the short list is meant to BE that cadence, not a sample of it
+MODEL_LEANS_COUNT = 6  # across all sports combined -- the volume lever when value-tip edge is thin this week
 
 with tab_week:
     st.caption(
@@ -336,6 +337,22 @@ with tab_week:
         st.subheader(f"Recommended bets this week ({len(recommended)})")
         st.caption(f"All within {lo:g}-{hi:g} odds, prioritising Line/Handicap — a short, curated list.")
         render_value_cards(recommended.to_dict("records"), show_sport_header=True, show_excluded=False)
+
+        # Model leans (Predictions): no confirmed market edge, so kept
+        # strictly separate from Must-Bet/Recommended above (those are only
+        # ever built from tip_type="value" -- a verified price discrepancy)
+        # rather than blended in. This is the volume lever for weeks where
+        # real cross-bookmaker edge in the odds range is thin -- a handful
+        # of bets a week doesn't have to come from value tips alone.
+        st.divider()
+        week_predictions = db.get_tips_in_range(today_str, week_end_str, tip_type="prediction")
+        top_predictions = sorted(week_predictions, key=lambda t: -t["model_prob"])[:MODEL_LEANS_COUNT]
+        st.subheader(f"This week's model leans ({len(top_predictions)})")
+        st.caption(
+            "No confirmed market edge -- the model just favours this side over the price. "
+            "Lower confidence than Must-Bet/Recommended above; extra volume, not extra certainty."
+        )
+        render_prediction_cards(top_predictions, show_sport_header=True)
 
         def _render_multi_combo(combo):
             with st.container(border=True):

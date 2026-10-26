@@ -1,0 +1,218 @@
+:root {
+  color-scheme: dark;
+  --bg: #0e1117;
+  --panel: #171b24;
+  --panel-border: #2a2f3a;
+  --text: #e6e6e6;
+  --text-dim: #9aa0ab;
+  --accent: #ff8c42;
+  --green: #3dd56d;
+  --orange: #f0a93c;
+  --red: #ff5c5c;
+  --blue: #4da3ff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  padding-top: env(safe-area-inset-top);
+}
+
+header.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+header.topbar h1 {
+  font-size: 1.2rem;
+  margin: 0 0 2px;
+}
+
+header.topbar .sub {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+main {
+  padding: 12px 14px 24px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+section { margin-bottom: 22px; }
+
+section h2 {
+  font-size: 1.02rem;
+  margin: 0 0 4px;
+}
+
+section .caption, .caption {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  margin: 0 0 10px;
+  line-height: 1.4;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.card .matchup {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.card .date { color: var(--text-dim); font-size: 0.82rem; }
+
+.card .pick-line {
+  margin-top: 6px;
+  font-size: 0.92rem;
+}
+.card .pick-line b { color: var(--accent); }
+
+.card .meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 8px;
+}
+.card .units {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+.card .units-label {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.card .risk-edge { font-size: 0.85rem; }
+
+.risk-Not-Risky { color: var(--green); font-weight: 600; }
+.risk-Neutral { color: var(--orange); font-weight: 600; }
+.risk-Risky { color: var(--red); font-weight: 600; }
+
+.card .reasoning {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.card .linked-bet {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  padding-top: 8px;
+  border-top: 1px dashed var(--panel-border);
+}
+.card .linked-bet b { color: var(--accent); }
+
+.alert {
+  background: #1d3324;
+  border: 1px solid #2d5c3d;
+  color: #b7f3c8;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 0.88rem;
+  margin-bottom: 14px;
+  line-height: 1.4;
+}
+
+.info-box {
+  background: #16263b;
+  border: 1px solid #214062;
+  color: #cfe3ff;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  margin-bottom: 10px;
+}
+
+.muted-note {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  padding: 6px 0;
+}
+
+details.expander {
+  margin-top: 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+details.expander > summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 0.86rem;
+  color: var(--text-dim);
+  list-style: none;
+}
+details.expander > summary::-webkit-details-marker { display: none; }
+details.expander > summary::before { content: "▸ "; }
+details.expander[open] > summary::before { content: "▾ "; }
+details.expander .expander-body { padding: 4px 14px 12px; }
+
+.combo-leg { font-size: 0.85rem; margin: 2px 0; color: var(--text-dim); }
+.combo-metrics {
+  display: flex;
+  gap: 18px;
+  margin-top: 8px;
+}
+.combo-metrics div span.v { display: block; font-size: 1.1rem; font-weight: 700; }
+.combo-metrics div span.l { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; }
+
+nav.tabbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  overflow-x: auto;
+  background: var(--panel);
+  border-top: 1px solid var(--panel-border);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 10;
+  -webkit-overflow-scrolling: touch;
+}
+nav.tabbar button {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  padding: 10px 14px;
+  white-space: nowrap;
+}
+nav.tabbar button.active {
+  color: var(--accent);
+  font-weight: 700;
+  border-top: 2px solid var(--accent);
+  margin-top: -1px;
+}
+
+.sport-group-header {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 14px 0 6px;
+}
+
+.loading { text-align: center; color: var(--text-dim); padding: 40px 0; }
