@@ -95,6 +95,27 @@ section .caption, .caption {
   margin-bottom: 10px;
 }
 
+.form-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin: 14px 0 4px;
+}
+.form-label:first-child { margin-top: 0; }
+.form-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+select.form-input {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
 .card .matchup {
   font-weight: 600;
   font-size: 0.95rem;

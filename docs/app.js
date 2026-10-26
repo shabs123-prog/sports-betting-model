@@ -25,6 +25,11 @@ function fmtPct(v) {
   return v === null || v === undefined ? "" : (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
 }
 
+function fmtMoney(v, signed) {
+  const sign = v < 0 ? "-" : signed ? "+" : "";
+  return `${sign}$${Math.abs(v).toFixed(2)}`;
+}
+
 function fmtWhen(t) {
   if (!t || !t.game_date) return "";
   const parts = String(t.game_date).split("-");
@@ -362,9 +367,107 @@ function renderMyBets() {
   return html;
 }
 
+// ------------------------------------------------------------ Bonus Converter
+// Pure math, mirrors models/matched_betting.py exactly -- back the bonus bet
+// at your bookmaker, lay the opposite outcome on an exchange (Betfair) to
+// lock in close to the same result either way. Manual entry only: finding
+// the best game automatically needs live odds (models/conversion_finder.py),
+// which stays dashboard-only since this is a static site with no backend.
+function bonusResult(stake, backOdds, layStake, layOdds, commission, snr) {
+  const profitIfBackWins = stake * (backOdds - 1) - layStake * (layOdds - 1);
+  const profitIfLayWins = (snr ? 0 : -stake) + layStake * (1 - commission);
+  const worstCase = Math.min(profitIfBackWins, profitIfLayWins);
+  return {
+    lay_stake: layStake,
+    profit_if_back_wins: profitIfBackWins,
+    profit_if_back_loses: profitIfLayWins,
+    worst_case_profit: worstCase,
+    retention_pct: stake ? worstCase / stake : 0,
+  };
+}
+
+function qualifyingBet(stake, backOdds, layOdds, commission) {
+  const layStake = (stake * backOdds) / (layOdds - commission);
+  return bonusResult(stake, backOdds, layStake, layOdds, commission, false);
+}
+
+function freeBet(stake, backOdds, layOdds, commission) {
+  const layStake = (stake * (backOdds - 1)) / (layOdds - commission);
+  return bonusResult(stake, backOdds, layStake, layOdds, commission, true);
+}
+
+function renderBonusCalc() {
+  return `
+    <p class="caption">Turn bonus/free bet money into cash: back the bonus bet at your bookmaker, then lay the opposite outcome on an exchange (Betfair) to lock in close to the same result either way. You place both legs yourself. Manual entry only — finding the best game automatically needs live odds, which stays on the dashboard.</p>
+    <div class="card">
+      <label class="form-label">Bet type</label>
+      <select id="bc-type" class="form-input">
+        <option value="free">Free / bonus bet (stake NOT returned)</option>
+        <option value="qualifying">Qualifying bet (your own money, stake returned)</option>
+      </select>
+
+      <label class="form-label">Bonus / stake amount ($)</label>
+      <input id="bc-stake" type="number" class="form-input" value="50" min="0" step="5">
+
+      <label class="form-label">Betfair commission (%) — check your current rate, it varies</label>
+      <input id="bc-commission" type="number" class="form-input" value="5" min="0" max="10" step="0.1">
+
+      <label class="form-label">Back odds (at your bookmaker, decimal)</label>
+      <input id="bc-back" type="number" class="form-input" value="4.0" min="1.01" step="0.05">
+
+      <label class="form-label">Lay odds (on Betfair Exchange, decimal)</label>
+      <input id="bc-lay" type="number" class="form-input" value="4.2" min="1.01" step="0.05">
+    </div>
+    <div id="bc-result"></div>
+  `;
+}
+
+function recomputeBonusCalc() {
+  const resultEl = document.getElementById("bc-result");
+  if (!resultEl) return;
+  const isFree = document.getElementById("bc-type").value === "free";
+  const stake = parseFloat(document.getElementById("bc-stake").value) || 0;
+  const commission = (parseFloat(document.getElementById("bc-commission").value) || 0) / 100;
+  const backOdds = parseFloat(document.getElementById("bc-back").value) || 0;
+  const layOdds = parseFloat(document.getElementById("bc-lay").value) || 0;
+
+  if (!(stake > 0) || !(layOdds > commission) || !(backOdds > 1)) {
+    resultEl.innerHTML = `<div class="info-box">Lay odds must be greater than the commission rate, and stake/back odds must be positive, for this to be calculable.</div>`;
+    return;
+  }
+
+  const r = isFree ? freeBet(stake, backOdds, layOdds, commission) : qualifyingBet(stake, backOdds, layOdds, commission);
+  const noteLabel = isFree ? "Retained" : "Cost to qualify";
+  const note = isFree
+    ? `Guaranteed outcome regardless of result: ${fmtMoney(r.worst_case_profit)} cash from a $${stake.toFixed(0)} bonus bet (${(r.retention_pct * 100).toFixed(0)}% retained).`
+    : "Cost (or small gain) of meeting a qualifying-bet requirement with your own money — typically a small loss, which unlocks the real bonus separately.";
+
+  resultEl.innerHTML = `
+    <div class="card">
+      <div class="bets-summary" style="margin-bottom:12px;">
+        <div><span class="v">$${r.lay_stake.toFixed(2)}</span><span class="l">Lay this much on Betfair</span></div>
+      </div>
+      <div class="bets-summary">
+        <div><span class="v">${fmtMoney(r.profit_if_back_wins, true)}</span><span class="l">If back wins</span></div>
+        <div><span class="v">${fmtMoney(r.profit_if_back_loses, true)}</span><span class="l">If back loses</span></div>
+        <div><span class="v">${(r.retention_pct * 100).toFixed(1)}%</span><span class="l">${noteLabel}</span></div>
+      </div>
+      <p class="caption" style="margin-top:10px;">${note}</p>
+    </div>`;
+}
+
+function setupBonusCalc() {
+  ["bc-type", "bc-stake", "bc-commission", "bc-back", "bc-lay"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", recomputeBonusCalc);
+  });
+  recomputeBonusCalc();
+}
+
 const TAB_RENDERERS = {
   week: renderThisWeek,
   mybets: renderMyBets,
+  bonus: renderBonusCalc,
   horses: renderHorses,
 };
 SPORT_ORDER.forEach((s) => { TAB_RENDERERS[s] = () => renderSport(s); });
@@ -377,11 +480,12 @@ function renderTab(tab) {
   }
   const fn = TAB_RENDERERS[tab];
   main.innerHTML = fn ? fn() : `<div class="muted-note">Unknown tab.</div>`;
+  if (tab === "bonus") setupBonusCalc();
 }
 
 function buildTabBar() {
   const nav = document.getElementById("tabbar");
-  const tabs = [["week", "This Week"], ...SPORT_ORDER.map((s) => [s, s.toUpperCase()]), ["horses", "Horses"], ["mybets", "My Bets"]];
+  const tabs = [["week", "This Week"], ...SPORT_ORDER.map((s) => [s, s.toUpperCase()]), ["horses", "Horses"], ["bonus", "Bonus Calc"], ["mybets", "My Bets"]];
   nav.innerHTML = tabs.map(([id, label]) => `<button data-tab="${id}">${label}</button>`).join("");
   nav.querySelectorAll("button").forEach((btn) => {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));

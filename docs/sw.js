@@ -1,11 +1,17 @@
-// Bump this version string every time any shell file (app.js, index.html,
-// styles.css, manifest) changes -- a browser only re-checks/re-caches the
-// shell when sw.js's own bytes change, so leaving this unchanged across
-// shell edits means already-installed clients keep serving a stale shell
-// indefinitely, even though the live server has the new version. This bit
-// us for real: the "Shab Shooter" rename, My Bets, and several other shell
-// changes shipped without this ever being bumped.
-const CACHE_NAME = "value-bets-v2";
+// Network-first for everything, including the shell (app.js, index.html,
+// styles.css, manifest) -- not just data.json. Cache-first for the shell
+// was the cause of a real, confusing bug: a normal reload would serve the
+// OLD cached shell immediately, while the browser only checked for a new
+// service worker in the background -- and even once a new worker
+// installed, the OLD page's already-running JS had no way to know to
+// reload, so it looked "stuck" until a second manual refresh. Network-
+// first means every load tries the live server first (so you always see
+// the latest version while online) and only falls back to cache when
+// there's genuinely no connection -- a small latency cost on each load,
+// worth it while this app is still actively changing. CACHE_NAME still
+// matters for the offline fallback itself, bump it on real shell changes,
+// but normal updates no longer depend on that at all.
+const CACHE_NAME = "value-bets-v3";
 const SHELL = [
   "./",
   "./index.html",
@@ -31,26 +37,13 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
-
-  // data.json: network-first so you get fresh tips when online, falling
-  // back to whatever was last cached when offline (no signal, flight mode).
-  if (url.pathname.endsWith("/data.json")) {
-    event.respondWith(
-      fetch(event.request)
-        .then((resp) => {
-          const copy = resp.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          return resp;
-        })
-        .catch(() => caches.match(event.request))
-    );
-    return;
-  }
-
-  // Everything else (shell files): cache-first, since they only change
-  // when a new version of this site is deployed, not daily.
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(event.request)
+      .then((resp) => {
+        const copy = resp.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return resp;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
