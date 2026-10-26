@@ -97,6 +97,16 @@ TERTIARY_SHARP_REFERENCE_BOOKMAKER = "Matchbook"
 # `python -m scripts.list_bookmakers` if the API's naming ever changes.
 USER_BOOKMAKERS = {"SportsBet", "PointsBet (AU)", "TAB", "Ladbrokes", "Betfair"}
 
+# Separate from USER_BOOKMAKERS on purpose: this is "apps you hold an
+# account at," used only for the Log Bet dropdown (your own manually-placed
+# bets, which don't need to match anything in The Odds API's data) --
+# USER_BOOKMAKERS is "apps The Odds API actually has live prices for,"
+# used to restrict tip pricing so every recommendation is placeable.
+# Bet365 isn't in The Odds API's AU data at all (confirmed early in this
+# project), so it can never drive a tip, but you can still log a bet you
+# placed there yourself.
+LOG_BET_BOOKMAKERS = USER_BOOKMAKERS | {"Bet365"}
+
 # "has_history": True means we have a results data source to train the Elo
 # model and generate ball-knowledge notes (ESPN's public site API -- see
 # data/espn.py -- no key needed, just an espn_sport/espn_league pair below).

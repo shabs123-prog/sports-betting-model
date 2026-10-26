@@ -349,6 +349,16 @@ function settleBet(id, result, autoGraded) {
   saveBets(bets);
 }
 
+function revertBetToPending(id) {
+  const bets = loadBets();
+  const bet = bets.find((b) => b.id === id);
+  if (!bet) return;
+  bet.result = "pending";
+  bet.profit_units = undefined;
+  bet.auto_graded = false;
+  saveBets(bets);
+}
+
 function deleteBet(id) {
   saveBets(loadBets().filter((b) => b.id !== id));
 }
@@ -466,9 +476,12 @@ function betCard(b) {
         <button class="bet-btn loss" data-settle="${b.id}" data-result="loss">Loss</button>
         <button class="bet-btn push" data-settle="${b.id}" data-result="push">Push</button>
       </div>`
-    : `<div class="bet-result-tag ${escapeHtml(b.result)}">${escapeHtml(b.result.toUpperCase())}${
-        b.profit_units !== undefined ? ` · ${b.profit_units >= 0 ? "+" : ""}${b.profit_units.toFixed(2)}u` : ""
-      }${b.auto_graded ? ` · auto` : ""}</div>`;
+    : `<div class="bet-settled-row">
+        <div class="bet-result-tag ${escapeHtml(b.result)}">${escapeHtml(b.result.toUpperCase())}${
+          b.profit_units !== undefined ? ` · ${b.profit_units >= 0 ? "+" : ""}${b.profit_units.toFixed(2)}u` : ""
+        }${b.auto_graded ? ` · auto` : ""}</div>
+        <button class="edit-result-btn" data-revert="${b.id}">Change</button>
+      </div>`;
   return `
     <div class="card">
       <button class="delete-bet" data-delete-bet="${b.id}" aria-label="Delete">×</button>
@@ -729,6 +742,12 @@ function init() {
     const settleBtn = e.target.closest("[data-settle]");
     if (settleBtn) {
       settleBet(settleBtn.dataset.settle, settleBtn.dataset.result, false);
+      renderTab(activeTab);
+      return;
+    }
+    const revertBtn = e.target.closest("[data-revert]");
+    if (revertBtn) {
+      revertBetToPending(revertBtn.dataset.revert);
       renderTab(activeTab);
       return;
     }

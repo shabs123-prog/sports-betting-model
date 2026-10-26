@@ -243,7 +243,6 @@ select.form-input {
 .bet-btn.push { border-color: var(--text-dim); color: var(--text-dim); }
 
 .bet-result-tag {
-  margin-top: 10px;
   display: inline-block;
   font-size: 0.8rem;
   font-weight: 700;
@@ -253,6 +252,22 @@ select.form-input {
 .bet-result-tag.win { background: #1d3324; color: var(--green); }
 .bet-result-tag.loss { background: #3a1d1d; color: var(--red); }
 .bet-result-tag.push { background: #2a2f3a; color: var(--text-dim); }
+
+.bet-settled-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.edit-result-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  text-decoration: underline;
+  padding: 4px;
+}
 
 .alert {
   background: #1d3324;
