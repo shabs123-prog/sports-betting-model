@@ -138,6 +138,11 @@ def build_sport(sport: str, cfg: dict) -> dict:
 
 def main():
     db.init_db()
+    # Pure local-clock check, no API call -- runs on every build regardless
+    # of whether the pipeline refresh succeeded, so a game that already
+    # started doesn't keep showing as a live pick just because quota
+    # blocked today's run.
+    db.supersede_started_games()
     lo, hi = _odds_range()
     data = {
         "generated_at": db.now_iso(),

@@ -29,6 +29,10 @@ from tips.generate_tips import run as run_pipeline
 
 st.set_page_config(page_title="Shab Shooter", layout="wide")
 db.init_db()
+# Pure local-clock check, no API call -- runs every page load regardless of
+# whether a refresh succeeded, so a game that already started stops
+# showing as a live pick even if quota blocked today's pipeline run.
+db.supersede_started_games()
 
 st.title("🏀 Shab Shooter")
 st.caption(

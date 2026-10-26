@@ -1,4 +1,11 @@
-const CACHE_NAME = "value-bets-v1";
+// Bump this version string every time any shell file (app.js, index.html,
+// styles.css, manifest) changes -- a browser only re-checks/re-caches the
+// shell when sw.js's own bytes change, so leaving this unchanged across
+// shell edits means already-installed clients keep serving a stale shell
+// indefinitely, even though the live server has the new version. This bit
+// us for real: the "Shab Shooter" rename, My Bets, and several other shell
+// changes shipped without this ever being bumped.
+const CACHE_NAME = "value-bets-v2";
 const SHELL = [
   "./",
   "./index.html",

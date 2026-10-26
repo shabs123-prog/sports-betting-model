@@ -3,8 +3,11 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from config import DB_PATH
+
+AU_TZ = ZoneInfo("Australia/Sydney")
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
@@ -88,6 +91,48 @@ def supersede_open_tips(sport: str, from_date: str):
             "WHERE sport = ? AND status = 'open' AND game_date >= ?",
             (sport, from_date),
         )
+
+
+def supersede_started_games():
+    """
+    Marks any still-open tip whose game has already started (AU-local now)
+    as superseded, independent of the odds pipeline -- supersede_open_tips
+    only clears a sport's old tips right before a fresh pipeline run, so if
+    quota runs out (or a scheduled refresh just doesn't happen) a game that
+    already kicked off keeps showing as a live pick indefinitely, since
+    nothing else ever marks it stale. Call this on every dashboard page
+    load and every PWA data.json build -- it's a pure local-clock check,
+    costs no API quota, and runs regardless of whether a refresh succeeded.
+    Rows from before game_time_local existed (or with no linked bet) have
+    no time to compare -- those just get cleared once the date itself has
+    passed, same as before this existed.
+    """
+    au_now = datetime.now(AU_TZ)
+    today = au_now.date().isoformat()
+
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE tips SET status = 'superseded' WHERE status = 'open' AND game_date < ?",
+            (today,),
+        )
+        rows = conn.execute(
+            "SELECT id, game_time_local FROM tips "
+            "WHERE status = 'open' AND game_date = ? AND game_time_local IS NOT NULL",
+            (today,),
+        ).fetchall()
+        stale_ids = []
+        for row in rows:
+            try:
+                game_time = datetime.strptime(row["game_time_local"].upper(), "%I:%M %p").time()
+            except (ValueError, AttributeError):
+                continue
+            if game_time <= au_now.time():
+                stale_ids.append(row["id"])
+        if stale_ids:
+            conn.executemany(
+                "UPDATE tips SET status = 'superseded' WHERE id = ?",
+                [(i,) for i in stale_ids],
+            )
 
 
 def get_tips_for_date(game_date: str, tip_type: str | None = None):

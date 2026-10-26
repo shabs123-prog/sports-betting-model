@@ -425,6 +425,17 @@ function init() {
       // Offline caching/installability is a nice-to-have, not load-bearing --
       // data.json still loads fine over a plain fetch without it.
     });
+    // Once a new service worker (newer CACHE_NAME, see sw.js) takes
+    // control, reload so the page actually uses the fresh shell instead of
+    // silently continuing to run the old cached app.js until the next
+    // manual refresh -- this is what caused the dashboard to look stuck on
+    // an old version after shell updates.
+    let reloadedForUpdate = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloadedForUpdate) return;
+      reloadedForUpdate = true;
+      location.reload();
+    });
   }
 
   setInterval(() => loadData({ silent: true }), POLL_MS);
