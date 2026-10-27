@@ -102,38 +102,47 @@ function combinedRating(tier, risk) {
   return COMBINED_RATING[`${tier}|${risk}`] || `${tier} / ${risk}`;
 }
 
-function tipCard(t) {
-  const hasPrice = t.bookmaker && t.odds_decimal;
+// Shared by tipCard and knowledgeCard so the odds/bookmaker/units block
+// looks and sits identically on every card, regardless of which list it
+// came from -- a real inconsistency before this (knowledgeCard used to
+// cram bookmaker+units into one small "Linked bet" line at the bottom
+// instead of this same pick-line + big-number meta-row).
+function pickLineAndMeta(t) {
+  if (!(t.bookmaker && t.odds_decimal)) return "";
   const tier = tierLabel(t.edge_pct);
   const riskEdge = t.risk
     ? `<span class="${tierClass(tier)}">${combinedRating(tier, t.risk)}</span>` +
       (t.edge_pct !== null && t.edge_pct !== undefined ? ` · ${fmtPct(t.edge_pct)}` : "")
     : (t.model_prob !== null && t.model_prob !== undefined ? `Model confidence: <b>${(t.model_prob * 100).toFixed(1)}%</b>` : "");
   return `
-    <div class="card">
-      <div class="matchup">${escapeHtml(t.matchup)}</div>
-      <div class="date">${escapeHtml(fmtWhen(t))}</div>
-      ${hasPrice ? `<div class="pick-line"><b>${escapeHtml(marketLabel(t.market))}</b> · ${escapeHtml(t.selection)} @ <b>${fmtOdds(t.odds_decimal)}</b> · ${escapeHtml(t.bookmaker)}</div>` : ""}
+      <div class="pick-line"><b>${escapeHtml(marketLabel(t.market))}</b> · ${escapeHtml(t.selection)} @ <b>${fmtOdds(t.odds_decimal)}</b> · ${escapeHtml(t.bookmaker)}</div>
       <div class="meta-row">
         <div><div class="units">${fmtUnits(t.suggested_units)}</div><div class="units-label">Units</div></div>
         <div class="risk-edge">${riskEdge}</div>
-      </div>
+      </div>`;
+}
+
+function tipCard(t) {
+  const hasPrice = t.bookmaker && t.odds_decimal;
+  return `
+    <div class="card">
+      <div class="matchup">${escapeHtml(t.matchup)}</div>
+      <div class="date">${escapeHtml(fmtWhen(t))}</div>
+      ${pickLineAndMeta(t)}
       ${t.reasoning ? `<div class="reasoning">${escapeHtml(t.reasoning)}</div>` : ""}
       ${hasPrice ? `<div class="card-actions">${logBetButton(t)}</div>` : ""}
     </div>`;
 }
 
 function knowledgeCard(t) {
-  const linked = t.bookmaker && t.odds_decimal
-    ? `<div class="linked-bet">Linked bet: <b>${escapeHtml(marketLabel(t.market))}</b> · ${escapeHtml(t.selection)} @ <b>${fmtOdds(t.odds_decimal)}</b> · ${escapeHtml(t.bookmaker)} · ${fmtUnits(t.suggested_units)}u</div>
-       <div class="card-actions">${logBetButton(t)}</div>`
-    : "";
+  const hasPrice = t.bookmaker && t.odds_decimal;
   return `
     <div class="card">
       <div class="matchup">${escapeHtml(t.matchup)}</div>
       <div class="date">${escapeHtml(fmtWhen(t))}</div>
+      ${pickLineAndMeta(t)}
       <div class="reasoning" style="margin-top:8px;">${escapeHtml(t.reasoning)}</div>
-      ${linked}
+      ${hasPrice ? `<div class="card-actions">${logBetButton(t)}</div>` : ""}
     </div>`;
 }
 

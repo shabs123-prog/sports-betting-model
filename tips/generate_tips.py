@@ -85,6 +85,15 @@ KELLY_FRACTION = 0.25
 MIN_UNITS = 0.5
 
 
+def _round_to_quarter(units: float) -> float:
+    """Explicit feedback (2026-10-27, follow-up): units should always end
+    in .00/.25/.50/.75, not an arbitrary decimal like 2.66 -- still
+    continuous in spirit (driven by the real Kelly/gap-ratio math, not a
+    fixed tier table), just rounded to the nearest quarter-unit at the
+    very end for a clean, easy-to-read number on the slip."""
+    return round(units * 4) / 4
+
+
 # Explicit feedback (2026-10-27, follow-up): 2.5u+ was showing up too
 # often. Checked live: it was almost entirely Predictions (h2h Elo leans
 # with no confirmed market edge) landing at exactly the same 3.0 ceiling
@@ -132,7 +141,7 @@ def _kelly_units(fair_prob: float, decimal_odds: float, settings: dict, max_unit
         units = soft_ceiling + headroom * excess / (excess + k)
     if decimal_odds > settings["max_single_odds"]:
         units = min(units, LONGSHOT_UNIT_CAP)
-    return round(max(MIN_UNITS, units), 2)
+    return _round_to_quarter(max(MIN_UNITS, units))
 
 
 # Model Elo is draw-aware for exactly zero of the sports configured so far --
@@ -174,7 +183,7 @@ def _scoring_lean_units(gap: float, threshold: float) -> float:
         return SCORING_LEAN_MAX_UNITS
     span = SCORING_LEAN_RATIO_CEILING - 1.0
     units = MIN_UNITS + (ratio - 1.0) / span * (SCORING_LEAN_MAX_UNITS - MIN_UNITS)
-    return round(units, 2)
+    return _round_to_quarter(units)
 
 
 def _espn_season_years(sport: str) -> list[int]:
