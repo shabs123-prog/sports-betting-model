@@ -60,9 +60,19 @@ DEFAULT_MAX_SINGLE_ODDS = float(_get_secret("MAX_SINGLE_ODDS", "2.2"))
 
 # Markets only available per-event (not the bulk /odds endpoint, e.g. btts)
 # cost quota per game, not once per sport -- restricting how far ahead we
-# bother pulling them keeps that cost bounded. 7 days, not the full 14,
-# since this is quota-per-game and the free tier is already tight.
-EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS = 7
+# bother pulling them keeps that cost bounded. Lowered from 7 to 3
+# (2026-10-27) after measuring the real daily cost of a full refresh
+# across NBA/EPL/NBL/NFL: 34 credits/day confirmed from live credit
+# counts (6 each for the four bulk pulls + 10 for EPL BTTS at a 7-day
+# window, ~10 games/week since the same game gets re-pulled on every day
+# it sits inside the window, not just once). 34/day x 30 = 1020/month,
+# which is OVER the 1000/month two free-tier keys provide -- no safety
+# margin at all. A 3-day window cuts BTTS to roughly 4-5 events/day
+# instead of ~10 (games are spread across the week), bringing the daily
+# total down to ~28-29 and the monthly total comfortably under 1000.
+# Costs a bit of lead time on BTTS specifically (found 3 days out instead
+# of a full week), not the other markets.
+EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS = 3
 
 # Odds API regions -- 'au' is the AU-licensed bookmakers you can actually bet
 # at. 'eu' is added to also pull Pinnacle -- a sharp, low-margin reference
