@@ -352,6 +352,28 @@ details.expander .expander-body { padding: 4px 14px 12px; }
 .tier-row-label { min-width: 72px; }
 .tier-row-stats { color: var(--text-dim); }
 
+.refresh-sport {
+  margin-bottom: 16px;
+}
+.refresh-sport-btn {
+  width: 100%;
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.refresh-sport-btn:disabled { opacity: 0.5; }
+.refresh-sport-status {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-align: center;
+  min-height: 1.1em;
+}
+
 nav.tabbar {
   position: fixed;
   bottom: 0;

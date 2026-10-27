@@ -3,6 +3,20 @@ const POLL_MS = 60000;
 const MAX_PREDICTIONS_PER_SPORT = 4;
 const SPORT_ORDER = ["nba", "epl", "nbl", "nfl", "nrl", "afl", "bbl"];
 
+// Per-sport "refresh now" button -- calls a small Cloudflare Worker proxy
+// (see cloudflare/refresh-proxy.js) which holds the real GitHub token
+// server-side and triggers daily-refresh.yml's workflow_dispatch with
+// this sport. Never calls GitHub directly from here -- a token that could
+// do that would be sitting in public, readable JS, which is exactly what
+// the proxy exists to avoid. REFRESH_PROXY_SECRET is a much lower-stakes
+// shared secret (worst case if someone else finds it: they can trigger
+// extra refreshes and burn a few quota credits, not touch the repo or
+// account) -- still worth treating as not-quite-public, but the blast
+// radius is bounded on purpose. Both blank until the Worker is deployed;
+// the button below hides itself until they're filled in.
+const REFRESH_PROXY_URL = "";
+const REFRESH_PROXY_SECRET = "";
+
 let state = { data: null };
 let editingTipKey = null; // which card (by tipKey) currently has its log-bet form open
 
@@ -202,10 +216,43 @@ function renderThisWeek() {
   return html;
 }
 
+// Fire-and-forget: tells the proxy to kick off the GitHub Action for this
+// sport, then leaves it running -- the workflow itself still takes about
+// a minute to pull odds and push, so this can only confirm "started",
+// not "done". Separate from the existing header ↻ button, which just
+// reloads whatever data.json already says; this one asks for NEW data
+// first.
+async function triggerRefresh(sport, buttonEl, statusEl) {
+  buttonEl.disabled = true;
+  statusEl.textContent = "Starting refresh…";
+  try {
+    const url = `${REFRESH_PROXY_URL}?sport=${encodeURIComponent(sport)}&key=${encodeURIComponent(REFRESH_PROXY_SECRET)}`;
+    const resp = await fetch(url);
+    const body = await resp.json().catch(() => ({}));
+    if (resp.ok && body.ok) {
+      statusEl.textContent = "Started — takes about a minute, then tap ↻ above to load it.";
+    } else {
+      statusEl.textContent = `Couldn't start it (${body.error || resp.status}).`;
+    }
+  } catch (e) {
+    statusEl.textContent = "Couldn't reach the refresh service.";
+  }
+  buttonEl.disabled = false;
+}
+
+function refreshSportButton(sport) {
+  if (!REFRESH_PROXY_URL) return ""; // hidden until the Worker is deployed and this is filled in
+  return `
+    <div class="refresh-sport">
+      <button class="refresh-sport-btn" data-refresh-sport="${sport}">↻ Refresh ${sport.toUpperCase()} odds now</button>
+      <div class="refresh-sport-status" data-refresh-status="${sport}"></div>
+    </div>`;
+}
+
 function renderSport(sport) {
   const s = state.data.sports[sport];
   const [lo, hi] = state.data.odds_range;
-  let html = "";
+  let html = refreshSportButton(sport);
   if (!s.has_history) {
     html += `<p class="caption">No results-history source wired up for this sport yet — devig value bets only, no Elo context or ball-knowledge notes.</p>`;
   }
@@ -775,6 +822,13 @@ function init() {
     if (delBtn) {
       deleteBet(delBtn.dataset.deleteBet);
       renderTab(activeTab);
+      return;
+    }
+    const refreshSportBtn = e.target.closest("[data-refresh-sport]");
+    if (refreshSportBtn) {
+      const sport = refreshSportBtn.dataset.refreshSport;
+      const statusEl = document.querySelector(`[data-refresh-status="${sport}"]`);
+      triggerRefresh(sport, refreshSportBtn, statusEl);
     }
   });
 
