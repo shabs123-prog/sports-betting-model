@@ -61,19 +61,16 @@ DEFAULT_MAX_SINGLE_ODDS = float(_get_secret("MAX_SINGLE_ODDS", "2.2"))
 
 # Markets only available per-event (not the bulk /odds endpoint, e.g. btts)
 # cost quota per game, not once per sport -- restricting how far ahead we
-# bother pulling them keeps that cost bounded. Lowered from 7 to 3
-# (2026-10-27) after measuring the real daily cost of a full refresh
-# across NBA/EPL/NBL/NFL: 34 credits/day confirmed from live credit
-# counts (6 each for the four bulk pulls + 10 for EPL BTTS at a 7-day
-# window, ~10 games/week since the same game gets re-pulled on every day
-# it sits inside the window, not just once). 34/day x 30 = 1020/month,
-# which is OVER the 1000/month two free-tier keys provide -- no safety
-# margin at all. A 3-day window cuts BTTS to roughly 4-5 events/day
-# instead of ~10 (games are spread across the week), bringing the daily
-# total down to ~28-29 and the monthly total comfortably under 1000.
-# Costs a bit of lead time on BTTS specifically (found 3 days out instead
-# of a full week), not the other markets.
-EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS = 3
+# bother pulling them keeps that cost bounded. Was 7, cut to 3 on
+# 2026-10-27 when the monthly budget was tight (two keys, 1000/month, a
+# full daily refresh already needed ~1020). Raised back to 5 the same day
+# once a third key landed (1500/month, real headroom even with this back
+# up) and explicit feedback asked for value found further out ("4-5 days
+# in advance"). The same near-term game gets re-pulled once per day it
+# sits inside this window, not just once, so moving 3->5 roughly doubles
+# BTTS's daily cost (~4-5 events/day -> ~8-9) -- affordable now, wasn't
+# at 1000/month.
+EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS = 5
 
 # Odds API regions -- 'au' is the AU-licensed bookmakers you can actually bet
 # at. 'eu' is added to also pull Pinnacle -- a sharp, low-margin reference
@@ -116,7 +113,14 @@ TERTIARY_SHARP_REFERENCE_BOOKMAKER = "Matchbook"
 # Pinnacle's own line is used as a sharper benchmark when it's available at
 # the same point. Must match the "title" strings above exactly; run
 # `python -m scripts.list_bookmakers` if the API's naming ever changes.
-USER_BOOKMAKERS = {"SportsBet", "PointsBet (AU)", "TAB", "Ladbrokes", "Betfair"}
+# Betfair removed 2026-10-27 (explicit feedback: "i dont use it") -- this
+# only stops it being offered as a bookmaker to actually BACK a bet at.
+# It stays as SECONDARY_SHARP_REFERENCE_BOOKMAKER above (a different role:
+# its exchange price is used as a sharp benchmark for fair-probability
+# calculation, which doesn't require holding an account there) and stays
+# wired into the Bonus Converter (which specifically needs an exchange to
+# LAY against, not back at -- a different mechanic from this list).
+USER_BOOKMAKERS = {"SportsBet", "PointsBet (AU)", "TAB", "Ladbrokes"}
 
 # Separate from USER_BOOKMAKERS on purpose: this is "apps you hold an
 # account at," used only for the Log Bet dropdown (your own manually-placed

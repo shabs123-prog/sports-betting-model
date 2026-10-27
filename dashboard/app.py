@@ -480,7 +480,7 @@ with tab_bonus:
             st.warning("Lay odds must be greater than the commission rate for this to be calculable.")
 
     else:
-        back_bookmaker = st.selectbox("Which app is the bonus from?", sorted(USER_BOOKMAKERS - {"Betfair"}))
+        back_bookmaker = st.selectbox("Which app is the bonus from?", sorted(USER_BOOKMAKERS))
         sports_to_scan = st.multiselect(
             "Scan which sports?", list(SPORT_CONFIG.keys()),
             default=["nba", "epl"], format_func=lambda s: s.upper(),
