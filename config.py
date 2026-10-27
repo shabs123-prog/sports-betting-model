@@ -32,7 +32,7 @@ ODDS_API_KEYS = [k for k in (ODDS_API_KEY, ODDS_API_KEY_2, ODDS_API_KEY_3) if k]
 
 DEFAULT_BANKROLL_AMOUNT = float(_get_secret("BANKROLL_AMOUNT", "1000"))
 DEFAULT_UNIT_SIZE_PCT = float(_get_secret("UNIT_SIZE_PCT", "0.01"))
-DEFAULT_MAX_UNITS_PER_BET = float(_get_secret("MAX_UNITS_PER_BET", "2.5"))
+DEFAULT_MAX_UNITS_PER_BET = float(_get_secret("MAX_UNITS_PER_BET", "3"))
 DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.0075"))
 
 # Stake size: a round, fixed unit count per edge tier used to live here
@@ -44,12 +44,15 @@ DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.0075"))
 # likelihood of hitting and the market edge -- which is literally what
 # the Kelly formula already is.
 #
-# Ceiling dropped 3 -> 2.5 the same day (second round of feedback, via a
-# friend's sense check): "3 units is also way too much." With the
-# saturating curve in _kelly_units, 2.5 means even a standout pick rarely
-# prices above ~2.0-2.25u in practice -- see KELLY_FRACTION's comment in
-# tips/generate_tips.py for the fuller reasoning (this ceiling change and
-# that fraction change were the same fix, done together).
+# Ceiling briefly dropped to 2.5 same day (second round of feedback, via
+# a friend's sense check: "3 units is also way too much"), then put back
+# to 3 right after on explicit follow-up -- "even 2.5 or 3 if super
+# confident... js do it based off confidence" clarified the actual ask
+# was never "lower the ceiling," it was "stop ordinary bets from reaching
+# it." KELLY_FRACTION (see tips/generate_tips.py) is what fixed that --
+# cut hard enough that a run-of-the-mill pick lands well below half this
+# cap, so 3u stays reachable but genuinely rare, reserved for the
+# standout cases the saturating curve in _kelly_units lets through.
 
 # Hard range on single-bet odds shown in the main "Value Bets"/"Predictions"
 # views -- not a soft discount zone, an actual floor and ceiling. Tips
