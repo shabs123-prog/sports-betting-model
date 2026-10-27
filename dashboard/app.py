@@ -3,7 +3,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -24,6 +25,16 @@ from models.edge import combined_rating, tier_label
 from models.risk import risk_label
 from tips.generate_tips import ensure_fresh
 from tips.generate_tips import run as run_pipeline
+
+# Mirrors pwa/build_site.py's _au_today() -- Streamlit Cloud's server
+# clock isn't guaranteed to be AEDT either, so the same UTC-vs-AEDT
+# mismatch applies here to any date-range filter anchored on "today".
+AU_TZ = ZoneInfo("Australia/Sydney")
+
+
+def _au_today() -> date:
+    return datetime.now(AU_TZ).date()
+
 
 st.set_page_config(page_title="Shab Shooter", layout="wide")
 db.init_db()
@@ -211,7 +222,7 @@ def render_sport_tab(sport: str):
         if st.button("Refresh", key=f"refresh_{sport}"):
             with st.spinner(f"Refreshing {sport.upper()}..."):
                 result = run_pipeline(sport=sport, log=lambda *_a, **_k: None)
-                db.set_setting(f"last_run_date_{sport}", date.today().isoformat())
+                db.set_setting(f"last_run_date_{sport}", _au_today().isoformat())
             st.success(
                 f"{result['value_tips']} value tips, {result.get('prediction_tips', 0)} predictions, "
                 f"{result['knowledge_notes']} knowledge notes."
@@ -223,25 +234,39 @@ def render_sport_tab(sport: str):
     if not cfg.get("auto_refresh"):
         st.caption("Not auto-refreshed daily (off-season or markets not posted yet) — use Refresh above to check manually.")
 
-    today_str = date.today().isoformat()
+    today_str = _au_today().isoformat()
     days_ahead = SPORT_TAB_DAYS_AHEAD_OVERRIDES.get(sport, SPORT_TAB_DAYS_AHEAD)
-    end_str = (date.today() + timedelta(days=days_ahead)).isoformat()
+    end_str = (_au_today() + timedelta(days=days_ahead)).isoformat()
+
+    value_tips = db.get_tips_in_range(today_str, end_str, tip_type="value", sport=sport)
+    prediction_tips = db.get_tips_in_range(today_str, end_str, tip_type="prediction", sport=sport) if cfg["has_history"] else []
+    knowledge_tips = db.get_tips_in_range(today_str, end_str, tip_type="knowledge", sport=sport) if cfg.get("show_knowledge", True) else []
+
+    # Falls forward to the next game day when this window is completely
+    # empty -- see pwa/build_site.py's build_sport() for the full reasoning
+    # (mirrored here so the dashboard and PWA never disagree).
+    if not (value_tips or prediction_tips or knowledge_tips):
+        next_date = db.get_next_tip_date(sport, end_str)
+        if next_date:
+            st.caption(f"Nothing until {next_date} -- showing that game day instead.")
+            value_tips = db.get_tips_in_range(next_date, next_date, tip_type="value", sport=sport)
+            if cfg["has_history"]:
+                prediction_tips = db.get_tips_in_range(next_date, next_date, tip_type="prediction", sport=sport)
+                if cfg.get("show_knowledge", True):
+                    knowledge_tips = db.get_tips_in_range(next_date, next_date, tip_type="knowledge", sport=sport)
 
     st.subheader("Value Bets")
-    value_tips = db.get_tips_in_range(today_str, end_str, tip_type="value", sport=sport)
     render_value_cards(value_tips)
 
     if cfg["has_history"]:
         st.divider()
         st.subheader("Predictions")
         st.caption("Model leans with no confirmed market edge — a lower-confidence claim than a Value Bet, not a detected price discrepancy.")
-        prediction_tips = db.get_tips_in_range(today_str, end_str, tip_type="prediction", sport=sport)
         render_prediction_cards(prediction_tips)
 
         if cfg.get("show_knowledge", True):
             st.divider()
             st.subheader("Ball Knowledge")
-            knowledge_tips = db.get_tips_in_range(today_str, end_str, tip_type="knowledge", sport=sport)
             render_knowledge_cards(knowledge_tips)
 
 
@@ -250,7 +275,7 @@ def render_sport_tab(sport: str):
 # shown), so this check runs once up front regardless of which tab is open.
 auto_sports = [s for s, cfg in SPORT_CONFIG.items() if cfg.get("auto_refresh")]
 already_checked_today = all(
-    db.get_setting(f"last_run_date_{s}") == date.today().isoformat() for s in auto_sports
+    db.get_setting(f"last_run_date_{s}") == _au_today().isoformat() for s in auto_sports
 )
 if not already_checked_today:
     with st.spinner(
@@ -279,13 +304,13 @@ with tab_week:
         "before the line sharpens closer to kickoff."
     )
 
-    today_str = date.today().isoformat()
+    today_str = _au_today().isoformat()
     # WEEK_AHEAD_DAYS, not 7 -- Line/Handicap/Totals value routinely posts
     # days to a week+ before kickoff (that's literally the "catch it at
     # 192.5 before it drifts to 190.5" ask), so "This Week" has to look as
     # far out as the per-sport tabs do or it'd find the value today but
     # drop it from Must-Bet/Recommended for being "too far away."
-    week_end_str = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
+    week_end_str = (_au_today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
     week_tips = db.get_tips_in_range(today_str, week_end_str, tip_type="value")
 
     if week_tips:

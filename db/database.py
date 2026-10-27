@@ -165,6 +165,20 @@ def get_tips_in_range(start_date: str, end_date: str, tip_type: str | None = Non
         return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
+def get_next_tip_date(sport: str, after_date: str) -> str | None:
+    """Earliest game_date strictly after after_date with any open tip for
+    this sport -- used to fall forward to "the next game day" when a
+    sport's own narrow tab window comes up empty (e.g. NFL's day-before
+    window between game days, or any sport mid-off-season-gap) instead of
+    just showing nothing."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT MIN(game_date) AS d FROM tips WHERE status = 'open' AND sport = ? AND game_date > ?",
+            (sport, after_date),
+        ).fetchone()
+        return row["d"] if row and row["d"] else None
+
+
 def get_all_tips(limit: int = 500):
     with get_conn() as conn:
         rows = conn.execute(

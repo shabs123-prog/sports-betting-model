@@ -268,14 +268,19 @@ function renderSport(sport) {
   if (!s.auto_refresh) {
     html += `<p class="caption">Not auto-refreshed daily (off-season or markets not posted yet).</p>`;
   }
-  // A sport that's genuinely quiet right now (off-season, nothing posted
-  // yet) can still have nothing here even over the full window -- flagged
-  // so it reads as "nothing to show" rather than "broken". Checked before
-  // the sections below so it shows even when has_history is false.
+  // next_game_day is set server-side (pwa/build_site.py) when this
+  // sport's own window came up completely empty and it fell forward to
+  // the next day that actually has something -- explicit feedback: show
+  // that day's picks instead of a blank tab. A sport that's genuinely
+  // quiet with nothing coming up at all still falls through to the plain
+  // empty message below. Checked before the sections so it shows even
+  // when has_history is false.
   const nothingHereAtAll =
     !s.value_in_range.length && !s.value_outside_range.length &&
     !s.predictions.length && !s.knowledge.length;
-  if (nothingHereAtAll) {
+  if (s.next_game_day) {
+    html += `<div class="info-box">Nothing sooner — here's the next game day (${escapeHtml(s.next_game_day)}):</div>`;
+  } else if (nothingHereAtAll) {
     html += `<div class="info-box">Nothing for this sport right now — check back once the next fixtures are posted.</div>`;
   }
 

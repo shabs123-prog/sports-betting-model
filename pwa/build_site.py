@@ -15,7 +15,8 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import date, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -25,6 +26,21 @@ from models import multis
 from models.risk import risk_label
 from models.team_names import build_nickname_index, resolve
 from tips.generate_tips import _finished_games_for_elo
+
+# This build runs on a GitHub Actions runner, whose system clock is UTC --
+# date.today() there returns UTC's calendar date, not AU's. At the main
+# ~7am AEDT cron (20:00 UTC) those two are already a full day apart (AEDT
+# has crossed midnight ~9 hours earlier), so "today" used naively would
+# anchor every date-range filter (This Week, a sport's own tab, results
+# lookback) one day too early relative to what "today" means to an AU
+# user -- explicit feedback flagged this as part of why a narrow window
+# (e.g. NFL's day-before tab) was coming up emptier than it should.
+AU_TZ = ZoneInfo("Australia/Sydney")
+
+
+def _au_today():
+    return datetime.now(AU_TZ).date()
+
 
 WEEK_AHEAD_DAYS = 14
 # A sport's own tab briefly meant "just today/tomorrow" (2026-10-27,
@@ -79,13 +95,13 @@ def _priority(t: dict) -> float:
 
 def build_this_week() -> dict:
     lo, hi = _odds_range()
-    today = date.today().isoformat()
+    today = _au_today().isoformat()
     # WEEK_AHEAD_DAYS, not 7 -- Line/Handicap/Totals value routinely posts
     # days to a week+ before kickoff (catching it at 192.5 before it drifts
     # to 190.5), so this has to look as far out as the per-sport tabs do or
     # it'd find the value today but drop it from Must-Bet/Recommended for
     # being "too far away."
-    week_end = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
+    week_end = (_au_today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
     week_tips = _with_risk(db.get_tips_in_range(today, week_end, tip_type="value"))
 
     week_predictions = db.get_tips_in_range(today, week_end, tip_type="prediction")
@@ -151,7 +167,7 @@ def build_results(sport: str, cfg: dict) -> list[dict]:
     if not cfg.get("has_history"):
         return []
     games = _finished_games_for_elo(sport, cfg)
-    cutoff = (date.today() - timedelta(days=RESULTS_LOOKBACK_DAYS)).isoformat()
+    cutoff = (_au_today() - timedelta(days=RESULTS_LOOKBACK_DAYS)).isoformat()
     recent = [g for g in games if g["date"] >= cutoff]
     if not recent:
         return []
@@ -179,26 +195,48 @@ def build_results(sport: str, cfg: dict) -> list[dict]:
     return results
 
 
-def build_sport(sport: str, cfg: dict) -> dict:
-    lo, hi = _odds_range()
-    today = date.today().isoformat()
-    days_ahead = SPORT_TAB_DAYS_AHEAD_OVERRIDES.get(sport, SPORT_TAB_DAYS_AHEAD)
-    end = (date.today() + timedelta(days=days_ahead)).isoformat()
-
-    value = _with_risk(db.get_tips_in_range(today, end, tip_type="value", sport=sport))
+def _sport_tips_for_window(sport: str, cfg: dict, start: str, end: str, lo: float, hi: float):
+    value = _with_risk(db.get_tips_in_range(start, end, tip_type="value", sport=sport))
     in_range = [t for t in value if lo <= t["odds_decimal"] <= hi]
     out_range = [t for t in value if not (lo <= t["odds_decimal"] <= hi)]
 
     predictions, knowledge = [], []
     if cfg["has_history"]:
-        predictions = db.get_tips_in_range(today, end, tip_type="prediction", sport=sport)
+        predictions = db.get_tips_in_range(start, end, tip_type="prediction", sport=sport)
         if cfg.get("show_knowledge", True):
-            knowledge = db.get_tips_in_range(today, end, tip_type="knowledge", sport=sport)
+            knowledge = db.get_tips_in_range(start, end, tip_type="knowledge", sport=sport)
+    return in_range, out_range, predictions, knowledge
+
+
+def build_sport(sport: str, cfg: dict) -> dict:
+    lo, hi = _odds_range()
+    today = _au_today().isoformat()
+    days_ahead = SPORT_TAB_DAYS_AHEAD_OVERRIDES.get(sport, SPORT_TAB_DAYS_AHEAD)
+    end = (_au_today() + timedelta(days=days_ahead)).isoformat()
+
+    in_range, out_range, predictions, knowledge = _sport_tips_for_window(sport, cfg, today, end, lo, hi)
+
+    # Explicit feedback: a narrow per-sport window (NFL's day-before
+    # override, or any sport genuinely quiet for a few days) going empty
+    # should fall forward to whatever the next game day actually is,
+    # rather than just showing nothing until that window happens to land
+    # on it. Only kicks in when the whole window came up empty -- a
+    # window with SOME content never falls forward, so this never hides
+    # or reorders what's already showing.
+    next_game_day = None
+    if not (in_range or out_range or predictions or knowledge):
+        next_date = db.get_next_tip_date(sport, end)
+        if next_date:
+            in_range, out_range, predictions, knowledge = _sport_tips_for_window(
+                sport, cfg, next_date, next_date, lo, hi
+            )
+            next_game_day = next_date
 
     return {
         "has_history": cfg["has_history"],
         "auto_refresh": cfg.get("auto_refresh", False),
         "show_knowledge": cfg.get("show_knowledge", True),
+        "next_game_day": next_game_day,
         "value_in_range": in_range,
         "value_outside_range": out_range,
         "predictions": predictions,

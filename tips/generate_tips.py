@@ -31,7 +31,7 @@ from db import database as db
 from knowledge import situational
 from models import edge, elo
 from models.devig import devig_book
-from models.kelly import suggested_stake
+from models.kelly import kelly_fraction
 from models.scoring import build_scoring_averages, project_matchup
 from models.team_names import build_nickname_index, resolve
 
@@ -64,58 +64,39 @@ LONGSHOT_UNIT_CAP = 0.75
 # Explicit feedback (2026-10-27): units don't need to land on round
 # numbers like 1.5/2.5 any more -- size continuously, as long as it
 # reflects both how likely the pick is to hit AND the market edge.
-# Fractional Kelly (models/kelly.py, previously built but unused) is
-# literally that formula -- a function of fair probability (likelihood
-# of hitting) and price (which, combined with fair probability, IS the
-# edge) in one continuous number, instead of two separate inputs
-# bucketed into a table. Uses the bankroll/unit-size settings already in
-# the Settings tab (previously unused by the pipeline) rather than
-# inventing new config.
+# Fractional Kelly (models/kelly.py) is literally that formula -- a
+# function of fair probability (likelihood of hitting) and price (which,
+# combined with fair probability, IS the edge) in one continuous number.
 #
-# Cut 0.25 -> 0.10 the same day (second round of feedback, via a
-# friend's sense check): "12% is like normal and most will be like
-# that... 3 units is also way too much." Checked the math on exactly
-# that case -- a genuinely ordinary pick (58% fair probability at 1.91,
-# roughly even-money odds) is ~12% full Kelly, and at the old 0.25
-# fraction that alone already priced at 3.0u pre-saturation, i.e. the
-# single most common kind of value tip was landing at (or right near)
-# the ceiling, not a below-average case. Quarter-Kelly was the wrong
-# amount of conservatism for a model that's confirmed (see
-# scripts/calibration.py) to carry real probability-estimation error,
-# not a hypothetical one -- the friend's "account for error" ask and
-# "3 units is too much" complaint are the same observation. Tenth-Kelly
-# is a standard, more conservative real-world fraction for exactly that
-# -- full Kelly assumes the input probability is exactly right, and it
-# measurably isn't. Re-run the same case after any future fraction
-# change: should land clearly below half the ceiling, not near it.
-KELLY_FRACTION = 0.10
-
-# Predictions get their OWN, lower fraction rather than sharing
-# KELLY_FRACTION -- added 2026-10-27 alongside the cut above, for a
-# reason specific to Predictions: their probability comes straight from
-# the Elo model (model_prob), not from devigging a market consensus
-# price like value tips do. scripts/calibration.py's walk-forward
-# backtest (re-run 2026-10-27) found real, confirmed overconfidence in
-# NBL and NFL specifically in the 50-70% predicted-probability band --
-# the exact range most routine Predictions fall in (NBL: 50-60% bucket
-# predicts ~55%, actually wins 44.8%; NFL: 50-60%/60-70% buckets both
-# ~9pt overconfident). CALIBRATION_SHRINKAGE in models/elo.py already
-# pulls these toward 50%, but it's a single constant fit on NBA's much
-# larger sample (1258 games vs NBL's 233/NFL's 363) and can only shrink
-# toward "no opinion," not fix a case like NBL's where the model's pick
-# wins LESS than half the time -- a real, known limitation, not
-# something a bigger shrinkage number fixes cleanly. Given that, sizing
-# Predictions more conservatively than value tips (on top of the
-# existing PREDICTION_MAX_UNITS cap below) is the honest lever here:
-# it can't correct which probability the model outputs, but it keeps a
-# wrong one from being staked like a confirmed market edge.
-PREDICTION_KELLY_FRACTION = 0.07
-# Explicit feedback (2026-10-27, follow-up): 0.5u is the floor for "risky
-# longshot, but I think it has a chance" -- not a number below that.
-# Raised from 0.25 (which some real picks were landing under) to match.
-# Kelly still drives everything above this floor continuously; this only
-# clips the bottom, same as settings["max_units"] clips the top.
+# This went through two earlier shapes the same day before landing here,
+# both via a "fraction of full Kelly, linear, then a soft ceiling above
+# some threshold" design -- quarter-Kelly (0.25) was cut to tenth-Kelly
+# (0.10) because a normal ~12%-full-Kelly pick was pricing at/near the
+# 3.0 ceiling pre-saturation. That fixed the top, but follow-up feedback
+# ("you don't have many 2 unit bets, that's my most common size") traced
+# to the SAME linear design from the other direction: pulled every real
+# in-range value tip's actual numbers (tips.db, all statuses) through
+# full-Kelly and found the typical detected edge is only ~1-8% full
+# Kelly -- at 0.10 fraction that's 0.1-0.8 raw units, almost all of which
+# the 0.5u floor was swallowing flat. Linear-then-saturate can't fix
+# both ends with one fraction: whatever makes the top sane crushes the
+# middle, and vice versa.
+#
+# Replaced the fraction+soft-ceiling with a single saturating curve
+# across the WHOLE range instead of just above a threshold:
+#   units = MIN_UNITS + (cap - MIN_UNITS) * x / (x + K)
+# where x is full-Kelly % (always >= 0). Strictly increasing, approaches
+# cap asymptotically (never pinned to it except for a genuinely enormous
+# edge), and K alone controls where "typical" lands -- no fraction, no
+# separate soft-ceiling ratio. CURVE_K = 5 was picked by checking it
+# against that same real data: the cluster of ordinary in-range edges
+# (~6-7% full Kelly) lands right at 2.0u, a thin edge (~1-2%) lands
+# 1.0-1.25u, the friend's "normal" 12% case lands 2.25u (clearly below
+# the ceiling, not pinned to it), and the two real historical outliers
+# (27%, 37% full Kelly) land 2.5-2.75u -- rare, standout, differentiated,
+# never quite hitting 3.0 short of a genuinely extreme edge.
 MIN_UNITS = 0.5
+CURVE_K = 5
 
 
 def _round_to_quarter(units: float) -> float:
@@ -131,29 +112,29 @@ def _round_to_quarter(units: float) -> float:
 # often. Checked live: it was almost entirely Predictions (h2h Elo leans
 # with no confirmed market edge) landing at exactly the same 3.0 ceiling
 # as real value tips -- backwards, since a Prediction is explicitly the
-# LOWER-confidence category (see PREDICTION_UNITS's old comment:
-# "shouldn't out-stake even a Lean value tip"). The scoring-margin leans
-# already had their own lower cap (SCORING_LEAN_MAX_UNITS); this gives
-# the Elo-based h2h leans the same discipline, via an optional override
-# on the shared Kelly sizing function rather than a second copy of it.
+# LOWER-confidence category. The scoring-margin leans already had their
+# own lower cap (SCORING_LEAN_MAX_UNITS); this gives the Elo-based h2h
+# leans the same discipline, via an optional override on the shared
+# sizing function rather than a second copy of it.
 PREDICTION_MAX_UNITS = 2.0
 
-# A second, separate problem the same feedback surfaced: raw linear
-# Kelly is so aggressive for a genuinely strong pick (checked live: 65%
-# win probability at 1.9 odds alone wants ~26% of bankroll under full
-# Kelly, 75% at 1.8 wants ~44%) that a hard cap just means most strong
-# picks land at the exact same ceiling number regardless of how much
-# stronger one is than another -- the opposite of "differentiate between
-# all of them." Below SOFT_CEILING_RATIO of the cap, sizing stays plain
-# linear Kelly (unchanged, that range was never the problem). Above it,
-# the excess is compressed into the remaining headroom with a saturating
-# curve (excess / (excess + K)) instead of a hard clip -- strictly
-# increasing (a better pick never sizes smaller than a worse one) but
-# approaches the cap instead of bunching everyone onto it, so 2.5-3.0
-# stays genuinely rare and reserved for the standout cases instead of
-# "anything reasonably confident."
-SOFT_CEILING_RATIO = 2 / 3
-SATURATION_K_MULTIPLIER = 2.5
+# Predictions get their own, higher K (slower to climb) rather than
+# sharing CURVE_K -- their probability comes straight from the Elo model
+# (model_prob), not from devigging a market consensus price like value
+# tips do, and scripts/calibration.py's walk-forward backtest (re-run
+# 2026-10-27) found real, confirmed overconfidence in NBL/NFL specifically
+# in the 50-70% predicted-probability band -- the exact range most
+# routine Predictions fall in. CALIBRATION_SHRINKAGE in models/elo.py
+# already pulls these toward 50%, but it's a single constant fit on
+# NBA's much larger sample and can only shrink toward "no opinion," not
+# fix a case like NBL's where the model's pick wins LESS than half the
+# time. Sizing Predictions more conservatively on top of the
+# PREDICTION_MAX_UNITS cap above is the honest lever here: it can't
+# correct which probability the model outputs, but it keeps a wrong one
+# from being staked like a confirmed market edge. 15 was checked against
+# real prediction data (tips.db) and keeps the existing, already-sane
+# 0.5-2.0u spread rather than retargeting it the way CURVE_K was.
+PREDICTION_CURVE_K = 15
 
 
 def _kelly_units(
@@ -161,24 +142,12 @@ def _kelly_units(
     decimal_odds: float,
     settings: dict,
     max_units_override: float | None = None,
-    kelly_fraction_override: float | None = None,
+    curve_k_override: float | None = None,
 ) -> float:
     cap = settings["max_units"] if max_units_override is None else min(settings["max_units"], max_units_override)
-    fraction = KELLY_FRACTION if kelly_fraction_override is None else kelly_fraction_override
-    result = suggested_stake(
-        fair_prob, decimal_odds,
-        settings["bankroll_amount"], settings["unit_size_pct"],
-        fraction, 999,  # uncapped here -- the saturating curve below does the capping
-    )
-    raw = result["units"]
-    soft_ceiling = cap * SOFT_CEILING_RATIO
-    if raw <= soft_ceiling:
-        units = raw
-    else:
-        headroom = cap - soft_ceiling
-        excess = raw - soft_ceiling
-        k = headroom * SATURATION_K_MULTIPLIER
-        units = soft_ceiling + headroom * excess / (excess + k)
+    k = CURVE_K if curve_k_override is None else curve_k_override
+    full_kelly_pct = kelly_fraction(fair_prob, decimal_odds) * 100
+    units = MIN_UNITS + (cap - MIN_UNITS) * full_kelly_pct / (full_kelly_pct + k)
     if decimal_odds > settings["max_single_odds"]:
         units = min(units, LONGSHOT_UNIT_CAP)
     return _round_to_quarter(max(MIN_UNITS, units))
@@ -696,7 +665,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 pred_units = _kelly_units(
                     model_prob, decimal_odds, settings,
                     max_units_override=PREDICTION_MAX_UNITS,
-                    kelly_fraction_override=PREDICTION_KELLY_FRACTION,
+                    curve_k_override=PREDICTION_CURVE_K,
                 )
                 reasoning_parts = [
                     _plain_why(why_facts, _PREDICTION_H2H_WHY_FALLBACK),
