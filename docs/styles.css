@@ -342,6 +342,16 @@ details.expander .expander-body { padding: 4px 14px 12px; }
 .combo-metrics div span.v { display: block; font-size: 1.1rem; font-weight: 700; }
 .combo-metrics div span.l { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; }
 
+.tier-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 0.85rem;
+}
+.tier-row-label { min-width: 72px; }
+.tier-row-stats { color: var(--text-dim); }
+
 nav.tabbar {
   position: fixed;
   bottom: 0;

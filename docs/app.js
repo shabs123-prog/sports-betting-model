@@ -333,6 +333,12 @@ function logBetFromTip(t, overrides) {
     units: o.units || t.suggested_units || 1,
     notes: o.notes || "",
     result: "pending",
+    // Captured at log time (not recomputed later) so the By Tier
+    // breakdown reflects what the tip actually looked like when you bet
+    // it, same as odds/units -- a tier is a point-in-time call tied to
+    // that edge_pct, not something that should drift with later code
+    // changes to tier thresholds.
+    tier: tierLabel(t.edge_pct),
   });
   saveBets(bets);
 }
@@ -492,6 +498,41 @@ function betCard(b) {
     </div>`;
 }
 
+// Breaks settled bets down by the tier they were logged at (captured on
+// the bet itself at log time, from the tip's edge_pct -- see
+// logBetFromTip) so you can actually see whether a tier's sizing matches
+// its real results, not just one all-time net-units number that hides
+// whether e.g. Lean bets are dragging down otherwise-good Strong picks.
+// Bets logged before this field existed have no tier stored -- grouped
+// under "Unrated" rather than silently dropped from the breakdown.
+const TIER_ORDER = ["Strong", "Moderate", "Lean", "Unrated"];
+
+function renderTierBreakdown(settled) {
+  if (!settled.length) return "";
+  const byTier = {};
+  for (const b of settled) {
+    const tier = b.tier || "Unrated";
+    (byTier[tier] = byTier[tier] || []).push(b);
+  }
+  const rows = TIER_ORDER.filter((t) => byTier[t] && byTier[t].length)
+    .map((tier) => {
+      const tierBets = byTier[tier];
+      const w = tierBets.filter((b) => b.result === "win").length;
+      const net = tierBets.reduce((s, b) => s + (b.profit_units || 0), 0);
+      const wr = ((w / tierBets.length) * 100).toFixed(0);
+      const cls = tier === "Strong" ? "risk-Not-Risky" : tier === "Moderate" ? "risk-Neutral" : "tier-Lean";
+      return `<div class="tier-row">
+        <span class="${cls} tier-row-label">${tier}</span>
+        <span class="tier-row-stats">${tierBets.length} bet${tierBets.length === 1 ? "" : "s"} · ${wr}% win · ${net >= 0 ? "+" : ""}${net.toFixed(2)}u</span>
+      </div>`;
+    })
+    .join("");
+  return `<details class="expander" style="margin-bottom:16px;">
+    <summary>By tier</summary>
+    <div class="expander-body">${rows}</div>
+  </details>`;
+}
+
 function renderMyBets() {
   autoGradeBets();
   const bets = loadBets();
@@ -505,6 +546,8 @@ function renderMyBets() {
   const pending = bets.filter((b) => b.result === "pending");
   const settled = bets.filter((b) => b.result !== "pending");
   const netUnits = settled.reduce((sum, b) => sum + (b.profit_units || 0), 0);
+  const totalStaked = settled.reduce((sum, b) => sum + (b.units || 0), 0);
+  const roiPct = totalStaked ? (netUnits / totalStaked) * 100 : 0;
   const wins = settled.filter((b) => b.result === "win").length;
   const winRate = settled.length ? ((wins / settled.length) * 100).toFixed(1) : "0.0";
 
@@ -513,6 +556,13 @@ function renderMyBets() {
     <div><span class="v">${winRate}%</span><span class="l">Win rate</span></div>
     <div><span class="v">${netUnits >= 0 ? "+" : ""}${netUnits.toFixed(2)}u</span><span class="l">Net units</span></div>
   </div>`;
+  if (totalStaked > 0) {
+    html += `<div class="bets-summary">
+      <div><span class="v">${roiPct >= 0 ? "+" : ""}${roiPct.toFixed(1)}%</span><span class="l">ROI (net ÷ staked)</span></div>
+      <div><span class="v">${totalStaked.toFixed(2)}u</span><span class="l">Total staked</span></div>
+    </div>`;
+  }
+  html += renderTierBreakdown(settled);
 
   if (pending.length) {
     html += `<section><h2>Pending (${pending.length})</h2>${pending.map(betCard).join("")}</section>`;
