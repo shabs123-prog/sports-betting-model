@@ -32,7 +32,7 @@ ODDS_API_KEYS = [k for k in (ODDS_API_KEY, ODDS_API_KEY_2, ODDS_API_KEY_3) if k]
 
 DEFAULT_BANKROLL_AMOUNT = float(_get_secret("BANKROLL_AMOUNT", "1000"))
 DEFAULT_UNIT_SIZE_PCT = float(_get_secret("UNIT_SIZE_PCT", "0.01"))
-DEFAULT_MAX_UNITS_PER_BET = float(_get_secret("MAX_UNITS_PER_BET", "3"))
+DEFAULT_MAX_UNITS_PER_BET = float(_get_secret("MAX_UNITS_PER_BET", "2.5"))
 DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.0075"))
 
 # Stake size: a round, fixed unit count per edge tier used to live here
@@ -43,6 +43,13 @@ DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.0075"))
 # be snapped to round values at all, should continuously reflect both
 # likelihood of hitting and the market edge -- which is literally what
 # the Kelly formula already is.
+#
+# Ceiling dropped 3 -> 2.5 the same day (second round of feedback, via a
+# friend's sense check): "3 units is also way too much." With the
+# saturating curve in _kelly_units, 2.5 means even a standout pick rarely
+# prices above ~2.0-2.25u in practice -- see KELLY_FRACTION's comment in
+# tips/generate_tips.py for the fuller reasoning (this ceiling change and
+# that fraction change were the same fix, done together).
 
 # Hard range on single-bet odds shown in the main "Value Bets"/"Predictions"
 # views -- not a soft discount zone, an actual floor and ceiling. Tips
