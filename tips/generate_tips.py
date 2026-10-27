@@ -32,7 +32,6 @@ from knowledge import situational
 from models import edge, elo
 from models.devig import devig_book
 from models.kelly import suggested_stake
-from models.risk import risk_label
 from models.scoring import build_scoring_averages, project_matchup
 from models.team_names import build_nickname_index, resolve
 
@@ -303,6 +302,54 @@ def _format_selection(outcome_name: str, point, market_key: str) -> str:
     return f"{outcome_name} {point:+g}"
 
 
+# Explicit feedback (2026-10-27): the card description was too technical/
+# jargon-heavy for a casual reader -- "no-vig fair probability", "price-
+# implied", bookmaker-benchmark names. The tier/risk badge already shown
+# right above this text (pwa/build_site.py + docs/app.js's combinedRating)
+# covers "how good/risky is this" -- these strings only need to cover
+# "why", in plain language, without repeating that badge.
+def _value_reasoning(fair_prob: float, decimal_odds: float, bookmaker: str) -> str:
+    implied_prob = 1.0 / decimal_odds
+    return (
+        f"About a {fair_prob:.0%} chance this comes in, but {bookmaker} only needs "
+        f"{implied_prob:.0%} for it to pay off -- that gap's the edge."
+    )
+
+
+def _elo_agreement_note(model_prob: float, fair_prob: float) -> str:
+    if abs(model_prob - fair_prob) >= 0.08:
+        return (
+            f"Our prediction model sees this one differently ({model_prob:.0%}) -- "
+            f"that's just model noise here, the market price above is the real signal."
+        )
+    return f"Our prediction model agrees ({model_prob:.0%})."
+
+
+_MODEL_LEAN_DISCLAIMER = (
+    "No confirmed market edge here -- just our prediction model's own read, "
+    "treat it as a lean rather than a sure thing, especially early in a season."
+)
+
+
+def _h2h_lean_reasoning(outcome_name: str, model_prob: float) -> str:
+    return f"Our model gives {outcome_name} about {model_prob:.0%} to win, a touch better than the price suggests. {_MODEL_LEAN_DISCLAIMER}"
+
+
+def _spreads_lean_reasoning(selection: str, home_projected: float, away_projected: float) -> str:
+    return (
+        f"Our scoring model expects this one to land around {home_projected:.0f}-{away_projected:.0f} -- "
+        f"enough to cover {selection}. {_MODEL_LEAN_DISCLAIMER}"
+    )
+
+
+def _totals_lean_reasoning(projected_total: float, point: float, wants_over: bool) -> str:
+    direction = "clearing" if wants_over else "staying under"
+    return (
+        f"Our scoring model expects around {projected_total:.0f} total points -- {direction} "
+        f"the {point:g} line here. {_MODEL_LEAN_DISCLAIMER}"
+    )
+
+
 def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> tuple[int, list[dict]]:
     """
     Markets not on the bulk /odds endpoint (e.g. btts) -- one API call per
@@ -358,13 +405,8 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
                 devig_edge_pct = edge.edge_pct(fair_prob, decimal_odds)
                 if devig_edge_pct < _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     continue
-                tier = edge.tier_label(devig_edge_pct)
-                risk = risk_label(fair_prob)
                 units = _kelly_units(fair_prob, decimal_odds, settings)
-                reasoning = (
-                    f"[{tier} edge · {risk}] No-vig fair probability (AU consensus): {fair_prob:.1%} "
-                    f"vs price-implied {1/decimal_odds:.1%} ({devig_edge_pct:+.1%} edge) at {bookmaker}."
-                )
+                reasoning = _value_reasoning(fair_prob, decimal_odds, bookmaker)
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
@@ -542,22 +584,10 @@ def run(sport: str = "nba", log=print) -> dict:
                 # not real edge. It must NEVER be the thing that triggers a tip
                 # or sizes a stake -- that was a bug in an earlier version.
                 if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
-                    tier = edge.tier_label(devig_edge_pct)
-                    risk = risk_label(fair_prob)
                     units = _kelly_units(fair_prob, decimal_odds, settings)
-                    reasoning_parts = [
-                        f"[{tier} edge · {risk}] No-vig fair probability ({fair_prob_source}): {fair_prob:.1%} "
-                        f"vs price-implied {1/decimal_odds:.1%} ({devig_edge_pct:+.1%} edge) at {bookmaker}.",
-                    ]
+                    reasoning_parts = [_value_reasoning(fair_prob, decimal_odds, bookmaker)]
                     if model_prob is not None:
-                        disagreement = abs(model_prob - fair_prob)
-                        if disagreement >= 0.08:
-                            reasoning_parts.append(
-                                f"Elo model says {model_prob:.1%}, which disagrees sharply with the "
-                                f"market here -- treat that gap as model noise, not extra confidence."
-                            )
-                        else:
-                            reasoning_parts.append(f"Elo model roughly agrees ({model_prob:.1%}).")
+                        reasoning_parts.append(_elo_agreement_note(model_prob, fair_prob))
                     if outcome_name in (home_odds_name, away_odds_name) and notes:
                         reasoning_parts.extend(notes)
 
@@ -626,13 +656,7 @@ def run(sport: str = "nba", log=print) -> dict:
                     max_units_override=PREDICTION_MAX_UNITS,
                     kelly_fraction_override=PREDICTION_KELLY_FRACTION,
                 )
-                reasoning_parts = [
-                    f"[Model prediction — no confirmed market edge] Elo gives {outcome_name} a "
-                    f"{model_prob:.1%} chance, above the {implied_prob:.1%} the price implies, "
-                    f"at {price_info['bookmaker']}. No cross-bookmaker price discrepancy was "
-                    f"found here — this is a model lean, not detected market value, and Elo is "
-                    f"noisiest early in a season.",
-                ]
+                reasoning_parts = [_h2h_lean_reasoning(outcome_name, model_prob)]
                 if outcome_name in (home_odds_name, away_odds_name) and notes:
                     reasoning_parts.extend(notes)
                 db.insert_tip({
@@ -694,14 +718,10 @@ def run(sport: str = "nba", log=print) -> dict:
                 if decimal_odds > settings["max_single_odds"]:
                     pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "spreads")
-                reasoning_parts = [
-                    f"[Model prediction — no confirmed market edge] Points-scored/allowed "
-                    f"projection ({scoring_projection['home_projected']:.0f}-"
-                    f"{scoring_projection['away_projected']:.0f}) has {outcome_name} covering "
-                    f"{selection} by about {gap:.1f} at {price_info['bookmaker']}. No cross-bookmaker "
-                    f"price discrepancy was found here — this is a simple scoring-average model, not "
-                    f"detected market value, and is noisiest early in a season.",
-                ]
+                reasoning_parts = [_spreads_lean_reasoning(
+                    selection,
+                    scoring_projection["home_projected"], scoring_projection["away_projected"],
+                )]
                 if outcome_name in (home_odds_name, away_odds_name) and notes:
                     reasoning_parts.extend(notes)
                 db.insert_tip({
@@ -747,13 +767,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 if decimal_odds > settings["max_single_odds"]:
                     pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "totals")
-                reasoning_parts = [
-                    f"[Model prediction — no confirmed market edge] Points-scored/allowed "
-                    f"projection has this game at {scoring_projection['projected_total']:.0f} total "
-                    f"points vs the {point:g} line at {price_info['bookmaker']}. No cross-bookmaker "
-                    f"price discrepancy was found here — this is a simple scoring-average model, not "
-                    f"detected market value, and is noisiest early in a season.",
-                ]
+                reasoning_parts = [_totals_lean_reasoning(scoring_projection["projected_total"], point, wants_over)]
                 if notes:
                     reasoning_parts.extend(notes)
                 db.insert_tip({
@@ -818,7 +832,7 @@ def run(sport: str = "nba", log=print) -> dict:
             knowledge_notes = list(notes)
             if reference_price_used:
                 knowledge_notes.append(
-                    "No confirmed value or model lean here -- current best price shown for reference only."
+                    "No pick here -- just showing the current best price for context."
                 )
             db.insert_tip({
                 "game_date": game_date,
