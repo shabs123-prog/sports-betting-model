@@ -27,6 +27,16 @@ from models.team_names import build_nickname_index, resolve
 from tips.generate_tips import _finished_games_for_elo
 
 WEEK_AHEAD_DAYS = 14
+# Explicit feedback (2026-10-27): a sport's own tab should be the
+# near-term, "what's actually on today/tomorrow" view -- not a week-long
+# list that buries tonight's game under things five days out. This Week
+# (WEEK_AHEAD_DAYS above) stays the forward-looking, multi-day view;
+# anything beyond this window simply doesn't show on the sport tab at
+# all any more, which is also what gives This Week its distinct job --
+# it's now the ONLY place a pick more than a day out shows up, extreme
+# value included, with no separate "crossover" logic needed to make that
+# happen (narrowing the sport tab's own window already does it).
+SPORT_TAB_DAYS_AHEAD = 1  # today + this many days -- 1 means day-of and day-after
 RECOMMENDED_COUNT = 5
 MUST_BET_MIN_EDGE = 0.015
 MUST_BET_COUNT = 4
@@ -160,7 +170,7 @@ def build_results(sport: str, cfg: dict) -> list[dict]:
 def build_sport(sport: str, cfg: dict) -> dict:
     lo, hi = _odds_range()
     today = date.today().isoformat()
-    end = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
+    end = (date.today() + timedelta(days=SPORT_TAB_DAYS_AHEAD)).isoformat()
 
     value = _with_risk(db.get_tips_in_range(today, end, tip_type="value", sport=sport))
     in_range = [t for t in value if lo <= t["odds_decimal"] <= hi]

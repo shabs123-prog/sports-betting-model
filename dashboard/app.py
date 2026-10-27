@@ -51,7 +51,13 @@ RISK_COLOR = {"Not Risky": "green", "Neutral": "orange", "Risky": "red"}
 # tier is the one that actually answers that, so it gets its own badge too.
 TIER_COLOR = {"Strong": "green", "Moderate": "orange", "Lean": "gray"}
 MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line", "btts": "BTTS"}
-WEEK_AHEAD_DAYS = 14  # how far out each sport tab looks -- value isn't just day-of
+WEEK_AHEAD_DAYS = 14  # how far out This Week looks
+# Explicit feedback (2026-10-27): a sport's own tab is the near-term
+# "what's on today/tomorrow" view now, not a week-long list -- This Week
+# (WEEK_AHEAD_DAYS above) is the only place anything further out shows,
+# extreme value included, which is what gives the two tabs a clear,
+# distinct job without needing separate "crossover" logic.
+SPORT_TAB_DAYS_AHEAD = 1  # today + this many days -- 1 means day-of and day-after
 
 
 def _odds_range() -> tuple[float, float]:
@@ -218,7 +224,7 @@ def render_sport_tab(sport: str):
         st.caption("Not auto-refreshed daily (off-season or markets not posted yet) — use Refresh above to check manually.")
 
     today_str = date.today().isoformat()
-    end_str = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
+    end_str = (date.today() + timedelta(days=SPORT_TAB_DAYS_AHEAD)).isoformat()
 
     st.subheader("Value Bets")
     value_tips = db.get_tips_in_range(today_str, end_str, tip_type="value", sport=sport)
