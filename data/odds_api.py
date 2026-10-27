@@ -2,16 +2,57 @@
 
 Free tier: 500 requests/month. Each call below costs 1 request per market
 requested, multiplied by number of regions -- keep markets/regions tight.
+
+Supports more than one API key (config.ODDS_API_KEYS) -- once a key's
+monthly quota is exhausted, falls over to the next one automatically.
+Confirmed live (2026-10-27) that an exhausted key returns error_code
+"OUT_OF_USAGE_CREDITS" -- their own docs say that's a 429, but it actually
+came back as a 401 in testing, so this checks the error_code in the
+response body rather than trusting a specific status code. Any other
+error (bad key, missing key, rate limit) raises immediately instead of
+silently trying the next key, so a real problem never gets masked as
+"just try key 2."
 """
 
 from __future__ import annotations
 import requests
 
-from config import ODDS_API_BASE, ODDS_API_KEY, ODDS_API_REGION
+from config import ODDS_API_BASE, ODDS_API_KEYS, ODDS_API_REGION
 
 
 class OddsApiError(RuntimeError):
     pass
+
+
+_QUOTA_EXHAUSTED_CODE = "OUT_OF_USAGE_CREDITS"
+
+
+def _request(url: str, params: dict):
+    if not ODDS_API_KEYS:
+        raise OddsApiError(
+            "No Odds API key set. Sign up at https://the-odds-api.com, "
+            "then put your key in .env as ODDS_API_KEY"
+        )
+    last_error = None
+    for i, key in enumerate(ODDS_API_KEYS):
+        resp = requests.get(url, params={**params, "apiKey": key}, timeout=15)
+        if resp.status_code == 200:
+            remaining = resp.headers.get("x-requests-remaining")
+            if remaining is not None:
+                print(f"[odds_api] key {i + 1}/{len(ODDS_API_KEYS)}: requests remaining this period: {remaining}")
+            return resp.json()
+
+        try:
+            error_code = resp.json().get("error_code")
+        except ValueError:
+            error_code = None
+        last_error = OddsApiError(f"Odds API error {resp.status_code}: {resp.text[:300]}")
+
+        if error_code == _QUOTA_EXHAUSTED_CODE and i + 1 < len(ODDS_API_KEYS):
+            print(f"[odds_api] key {i + 1}/{len(ODDS_API_KEYS)} out of usage credits, trying next key...")
+            continue
+        raise last_error
+    raise last_error
 
 
 def fetch_events(sport_key: str) -> list[dict]:
@@ -20,16 +61,8 @@ def fetch_events(sport_key: str) -> list[dict]:
     -- free, doesn't cost quota. Used to find event ids for markets that
     only exist per-event (e.g. btts), which the bulk /odds endpoint 422s on.
     """
-    if not ODDS_API_KEY:
-        raise OddsApiError(
-            "ODDS_API_KEY is not set. Sign up at https://the-odds-api.com, "
-            "then put your key in .env"
-        )
     url = f"{ODDS_API_BASE}/sports/{sport_key}/events"
-    resp = requests.get(url, params={"apiKey": ODDS_API_KEY}, timeout=15)
-    if resp.status_code != 200:
-        raise OddsApiError(f"Odds API error {resp.status_code}: {resp.text[:300]}")
-    return resp.json()
+    return _request(url, {})
 
 
 def fetch_event_odds(sport_key: str, event_id: str, markets: str, region: str = "au") -> dict:
@@ -41,46 +74,25 @@ def fetch_event_odds(sport_key: str, event_id: str, markets: str, region: str = 
     roughly halve that per-event cost -- these markets don't need Pinnacle
     as a sharp reference as much as h2h/spreads/totals do.
     """
-    if not ODDS_API_KEY:
-        raise OddsApiError(
-            "ODDS_API_KEY is not set. Sign up at https://the-odds-api.com, "
-            "then put your key in .env"
-        )
     url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
     params = {
-        "apiKey": ODDS_API_KEY,
         "regions": region,
         "markets": markets,
         "oddsFormat": "decimal",
         "dateFormat": "iso",
     }
-    resp = requests.get(url, params=params, timeout=15)
-    if resp.status_code != 200:
-        raise OddsApiError(f"Odds API error {resp.status_code}: {resp.text[:300]}")
-    return resp.json()
+    return _request(url, params)
 
 
 def fetch_odds(sport_key: str, markets: str = "h2h", region: str = ODDS_API_REGION) -> list[dict]:
-    if not ODDS_API_KEY:
-        raise OddsApiError(
-            "ODDS_API_KEY is not set. Sign up at https://the-odds-api.com, "
-            "then put your key in .env"
-        )
     url = f"{ODDS_API_BASE}/sports/{sport_key}/odds"
     params = {
-        "apiKey": ODDS_API_KEY,
         "regions": region,
         "markets": markets,
         "oddsFormat": "decimal",
         "dateFormat": "iso",
     }
-    resp = requests.get(url, params=params, timeout=15)
-    if resp.status_code != 200:
-        raise OddsApiError(f"Odds API error {resp.status_code}: {resp.text[:300]}")
-    remaining = resp.headers.get("x-requests-remaining")
-    if remaining is not None:
-        print(f"[odds_api] requests remaining this period: {remaining}")
-    return resp.json()
+    return _request(url, params)
 
 
 def consensus_points(event: dict, market_key: str, allowed_bookmakers: set | None = None) -> dict:

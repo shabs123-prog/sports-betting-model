@@ -22,6 +22,12 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "tips.db"
 
 ODDS_API_KEY = _get_secret("ODDS_API_KEY", "")
+# Optional second (third, ...) free-tier key -- data/odds_api.py falls over
+# to the next one automatically once a key's monthly quota is exhausted.
+# Unset by default; harmless if never configured (ODDS_API_KEYS below just
+# ends up a single-key list, identical to the old behaviour).
+ODDS_API_KEY_2 = _get_secret("ODDS_API_KEY_2", "")
+ODDS_API_KEYS = [k for k in (ODDS_API_KEY, ODDS_API_KEY_2) if k]
 
 DEFAULT_BANKROLL_AMOUNT = float(_get_secret("BANKROLL_AMOUNT", "1000"))
 DEFAULT_UNIT_SIZE_PCT = float(_get_secret("UNIT_SIZE_PCT", "0.01"))

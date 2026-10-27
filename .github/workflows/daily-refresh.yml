@@ -37,6 +37,10 @@ jobs:
         run: python -m scripts.run_auto_refresh
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          # Optional second free-tier key -- data/odds_api.py falls over to
+          # it automatically once the first one's monthly quota is used up.
+          # Safe to leave unset (secrets.ODDS_API_KEY_2 just resolves empty).
+          ODDS_API_KEY_2: ${{ secrets.ODDS_API_KEY_2 }}
 
       - name: Build PWA site data
         run: python -m pwa.build_site
