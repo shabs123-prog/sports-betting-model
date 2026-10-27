@@ -96,9 +96,12 @@ pays if every leg lands, smaller again for the correlated/approximate SGMs).
 
 A separate, explicitly lower-confidence tip category: the Elo model's own
 lean on a game, shown even when no cross-bookmaker price discrepancy was
-found. Different claim than a value tip and never mixed into its count,
-sizing, or the min-edge threshold — flat `PREDICTION_UNITS` stake, its own
-`tip_type`, reasoning that says plainly "no confirmed market edge."
+found. Different claim than a value tip and never mixed into its count or
+the min-edge threshold — its own `tip_type`, reasoning that says plainly
+"no confirmed market edge." Sized the same probability-driven way value
+tips are (see Stake sizing below): win-probability band drives it for the
+Elo-based leans here, an equivalent confidence read off the scoring-margin
+gap drives it for the spreads/totals leans below.
 Gated to `PREDICTION_ELIGIBLE_SPORTS` (nba/nbl/nfl/afl) because the Elo
 model only ever splits probability between home/away — for a 3-way sport
 like EPL (draws are ~25% of results) that would overstate both teams' true
@@ -132,61 +135,107 @@ path hasn't been exercised against live data yet, since this shipped while
 the account was at 0/500 API requests for the period; first real daily
 refresh after quota resets is the actual end-to-end test.
 
-### Line Movement (`line_history` table, This Week tab)
+### Line Movement -- removed (2026-10-27)
 
-Catching a line before it moves (e.g. a total posted at 192.5 drifting to
-190.5 a few days later) is a different, legitimate technique from the
-devig/sharp-reference comparison everything else here uses -- and it needs
-genuine historical odds. The Odds API's historical endpoint does exactly
-this but is paid-tier only (confirmed by testing against this account's
-free key, not assumed: `HISTORICAL_UNAVAILABLE_ON_FREE_USAGE_PLAN`). Rather
-than pay for it or fake the signal, `run()` now records every outcome's
-fair probability (and point, for Line/Handicap) to `line_history` on every
-pipeline run, tip-worthy or not. `db.get_moved_lines()` finds any line with
-snapshots spanning 2+ distinct calendar days and reports first-seen vs
-latest. This is a cold start: empty for the first week or two after this
-shipped, by design -- there's no backfill, just forward accumulation.
-Verified the query logic works correctly by manually inserting a synthetic
-older snapshot and confirming it's picked up and rendered right (see git
-history around when this landed) -- the only thing actually missing right
-now is time for real data to accumulate.
+Used to be its own This Week section: every pipeline run recorded each
+outcome's fair probability (and point, for Line/Handicap) to
+`line_history`, and a "Line Movement" card reported any line with 2+ days
+of tracked snapshots, first-seen vs latest. Cut it -- it was purely
+descriptive (a point moving from 192.5 to 190.5, no odds/bookmaker/units
+attached), not actually a bet card, and explicit feedback was that it
+wasn't useful. The real thing it was gesturing at -- catching spreads/
+totals/handicap value a few days before kickoff, before the market
+corrects -- already happens through the ordinary value-tip engine (it
+runs across h2h/spreads/totals every day) and spreads/totals already get
+priority in the This Week ranking (see `_priority()` in `pwa/build_site.py`).
+The `line_history` table and its insert/lookup functions (`data` layer
+only, no UI) stay -- still useful for checking one specific line's history
+by hand, just not surfaced as its own section any more.
 
 ### API quota
 
-Billing is `markets × regions`, and every call now requests `au,eu`
-(for Pinnacle) regardless of whether Pinnacle ends up covering that
-market — so 3 markets x 2 regions = 6 credits per sport per refresh, up
-from 3 before. With NBA/EPL/NFL auto-refreshing daily: 18 credits/day ≈
-540/month, which is **over** the free tier's 500/month if run every single
-day without fail. Drop a sport from `auto_refresh` in `config.SPORT_CONFIG`,
-or run less than daily, if you're hitting the limit -- or upgrade to a paid
-Odds API tier if you want to auto-refresh more sports/more often.
+Billing is `markets × regions`, and every call requests `au,eu` (for
+Pinnacle) regardless of whether Pinnacle ends up covering that market —
+so 3 markets × 2 regions = 6 credits per sport per refresh. Measured the
+real cost of a full daily refresh live (2026-10-27): NBA 6 + EPL 6 + NBL 6
++ NFL 6 + EPL BTTS ~10 (at a 7-day lookahead) = **34 credits/day**, i.e.
+~1020/month — over a single free tier's 500/month, and still over two
+free tiers' 1000/month combined.
 
-**Extra per-event markets** (`config.SPORT_CONFIG[sport]["extra_event_markets"]`,
-currently just EPL's `btts`) cost quota differently: these aren't on the
-bulk `/odds` endpoint at all, so they're pulled one API call per event
-instead of one call per sport. Restricted to
-`EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS` (7, not the full 14-day window) to
-keep that bounded — EPL alone adds roughly 9 credits/day on top of its
-existing 6, pushing total usage further over the free tier. Confirmed
-live: this genuinely hit 458/500 for the period during development/testing
-of this feature, so real day-to-day usage (without heavy testing) will be
-lower, but the free tier is tight even before this.
+Two things fixed this:
 
-Every value tip gets two independent labels:
+- **Multiple API keys** (`config.ODDS_API_KEYS`, `data/odds_api.py`) --
+  set `ODDS_API_KEY`, `ODDS_API_KEY_2`, `ODDS_API_KEY_3` (any subset) and
+  the client falls over to the next one automatically once the current
+  one hits `OUT_OF_USAGE_CREDITS` (confirmed live that error comes back
+  as HTTP 401 despite The Odds API's own docs saying 429 -- this checks
+  the response body's `error_code`, not a specific status, to be safe
+  either way). Any other error (bad/missing key, rate limit) still raises
+  immediately rather than silently trying the next key. Each additional
+  key adds another 500/month.
+- **`EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS` lowered 7 → 3** -- the same
+  near-term game gets re-pulled for BTTS on every day it sits inside the
+  window, not just once, so this roughly halves that cost (~4-5 events/day
+  instead of ~10) at the cost of finding BTTS value a bit closer to
+  kickoff instead of a full week out.
+
+Drop a sport from `auto_refresh` in `config.SPORT_CONFIG`, or add another
+key, if you're still hitting the limit — or upgrade to a paid Odds API
+tier (20K credits/month is $30 as of writing) if you want to auto-refresh
+more sports/more often than that covers.
+
+**Manual/selective refreshes, two ways:**
+- GitHub Actions tab → "Daily tips refresh" → Run workflow → pick one
+  sport from the dropdown (or "all") instead of the scheduled daily run.
+  Bypasses `auto_refresh` too, so you can check an off sport on purpose —
+  worth knowing that costs nothing extra either way: a sport with zero
+  events costs 0 quota regardless of markets/regions requested (confirmed
+  live), so the real saving from picking one sport is not re-checking
+  sports you don't currently care about, in-season or not.
+- The PWA's own per-sport "Refresh NBA odds now" buttons do the same
+  thing without leaving the app or needing to be logged into GitHub — see
+  `cloudflare/refresh-proxy.js` for what backs that and how to deploy it
+  (inert, buttons stay hidden, until you do).
+
+**Two scheduled runs**, not one: `0 19 * * *` UTC (~6am AEDT) does the
+full "all" refresh; `0 7 * * *` UTC (~6pm AEDT) does NBA only. NBA plays
+daily and bets tend to get placed the evening before game day, so 6am
+data can be most of a day stale by then; EPL/NFL/NBL don't play daily, so
+they're left to the once-a-day refresh. The second run only adds ~6
+credits/day (one sport's bulk pull), which wasn't affordable on two keys
+(1000/month, already fully committed) but is comfortable on three
+(1500/month).
+
+### Stake sizing
+
+Every tip (value or prediction) gets two independent labels:
 
 - **Edge tier** (`models/edge.tier_label`) — Strong / Moderate / Lean, how
-  big the devig edge is.
+  big the devig edge is. Value tips only; predictions have no confirmed
+  edge by definition.
 - **Risk** (`models/risk.risk_label`) — Not Risky / Neutral / Risky, based on
   how likely the pick is to actually win (favourite vs underdog), regardless
   of edge size.
 
 Each sport tab groups bets by risk — so you can see "safe anchors" vs
-"risky longshots" the way a tipping app typically lays it out. Stake sizing
-is a fixed unit count per edge tier (Strong/Moderate/Lean → configurable
-units, default 2.5/1.75/1.0), capped by a hard max-units-per-bet setting —
-rounder, more intuitive numbers than a continuously-scaled Kelly fraction,
-while still scaling with how confident the edge is.
+"risky longshots" the way a tipping app typically lays it out.
+
+Stake sizing (`tips/generate_tips._tier_units`) is **risk-band-first, not
+edge-tier-first** (changed 2026-10-27, explicit feedback: "more likely to
+hit shld be 2 units regardless of market edge"): `RISK_BASE_UNITS` (Not
+Risky=2.0, Neutral=1.25, Risky=0.5) sets the stake, and a Strong edge
+(≥3%) adds a flat `STRONG_EDGE_BONUS` (0.75) on top — a thin-but-real
+(Lean) edge never gets shrunk just for being thin, as long as it's
+genuinely positive; a pick still needs real edge to become a tip at all,
+"likely to hit" alone with no mispricing isn't a bet. Predictions
+(`tip_type="prediction"`) use the same `RISK_BASE_UNITS` table — the
+Elo-based h2h leans off the real `model_prob`, the scoring-margin spreads/
+totals leans off an equivalent confidence read of how far their gap
+clears the min-gap bar (`_scoring_lean_risk`) since they have no clean
+probability to bucket. Everything still capped by the hard max-units-per-
+bet setting and the longshot-odds cap. Rounder, more intuitive numbers
+than a continuously-scaled Kelly fraction, while still scaling with real
+variation instead of clustering at one value.
 `models/kelly.py`'s actual Kelly-criterion math still exists as a tested
 utility if you want to switch back to it, just isn't wired into the default
 pipeline.
