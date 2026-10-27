@@ -711,10 +711,7 @@ def run(sport: str = "nba", log=print) -> dict:
                     "selection": home_odds_name,
                     "bookmaker": ref_price["bookmaker"],
                     "odds_decimal": ref_price["price"],
-                    "suggested_units": (
-                        LONGSHOT_UNIT_CAP if ref_price["price"] > settings["max_single_odds"]
-                        else settings["tier_units"]["Lean"]
-                    ),
+                    "suggested_units": LONGSHOT_UNIT_CAP,
                 }
                 reference_price_used = True
 
