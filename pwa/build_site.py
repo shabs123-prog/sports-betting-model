@@ -38,6 +38,17 @@ WEEK_AHEAD_DAYS = 14
 # views still differ (per-sport list vs. the cross-sport ranked feed),
 # just over the same date range.
 SPORT_TAB_DAYS_AHEAD = WEEK_AHEAD_DAYS
+# NFL-only exception, same day: a full 32-team league generates far more
+# predictions per week than EPL/NBL do (confirmed live: 24 NFL
+# predictions at once vs EPL/NBL in single digits) -- "too many slips...
+# bombard my screen." A genuinely strong NFL pick several days out still
+# surfaces fine via This Week's own extreme-value handling; the NFL tab
+# itself goes back to near-term only ("day before"), same semantics the
+# shared default briefly had. EPL/NBL/NBA explicitly don't have this
+# problem ("doesn't bombard my screen... nba is okay... idm the volume"),
+# so they keep the full WEEK_AHEAD_DAYS window -- this is NFL-specific,
+# not a reversion of the change above.
+SPORT_TAB_DAYS_AHEAD_OVERRIDES = {"nfl": 1}
 RECOMMENDED_COUNT = 5
 MUST_BET_MIN_EDGE = 0.015
 MUST_BET_COUNT = 4
@@ -171,7 +182,8 @@ def build_results(sport: str, cfg: dict) -> list[dict]:
 def build_sport(sport: str, cfg: dict) -> dict:
     lo, hi = _odds_range()
     today = date.today().isoformat()
-    end = (date.today() + timedelta(days=SPORT_TAB_DAYS_AHEAD)).isoformat()
+    days_ahead = SPORT_TAB_DAYS_AHEAD_OVERRIDES.get(sport, SPORT_TAB_DAYS_AHEAD)
+    end = (date.today() + timedelta(days=days_ahead)).isoformat()
 
     value = _with_risk(db.get_tips_in_range(today, end, tip_type="value", sport=sport))
     in_range = [t for t in value if lo <= t["odds_decimal"] <= hi]

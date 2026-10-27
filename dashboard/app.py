@@ -53,6 +53,11 @@ WEEK_AHEAD_DAYS = 14  # how far out This Week looks
 # brief 1-day version got walked back same-day (EPL/NFL/NBL tabs were
 # going near-empty whenever their next game sat a few days out).
 SPORT_TAB_DAYS_AHEAD = WEEK_AHEAD_DAYS
+# NFL-only exception -- see pwa/build_site.py's comment: a 32-team league
+# generates too much volume for its own tab at the full window ("too many
+# slips... bombard my screen"), a problem EPL/NBL/NBA explicitly don't
+# have. Genuinely strong NFL picks further out still surface via This Week.
+SPORT_TAB_DAYS_AHEAD_OVERRIDES = {"nfl": 1}
 
 
 def _odds_range() -> tuple[float, float]:
@@ -219,7 +224,8 @@ def render_sport_tab(sport: str):
         st.caption("Not auto-refreshed daily (off-season or markets not posted yet) — use Refresh above to check manually.")
 
     today_str = date.today().isoformat()
-    end_str = (date.today() + timedelta(days=SPORT_TAB_DAYS_AHEAD)).isoformat()
+    days_ahead = SPORT_TAB_DAYS_AHEAD_OVERRIDES.get(sport, SPORT_TAB_DAYS_AHEAD)
+    end_str = (date.today() + timedelta(days=days_ahead)).isoformat()
 
     st.subheader("Value Bets")
     value_tips = db.get_tips_in_range(today_str, end_str, tip_type="value", sport=sport)
