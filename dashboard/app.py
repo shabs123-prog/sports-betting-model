@@ -49,12 +49,10 @@ RISK_COLOR = {"Not Risky": "green", "Neutral": "orange", "Risky": "red"}
 TIER_COLOR = {"Strong": "green", "Moderate": "orange", "Lean": "gray"}
 MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line", "btts": "BTTS"}
 WEEK_AHEAD_DAYS = 14  # how far out This Week looks
-# Explicit feedback (2026-10-27): a sport's own tab is the near-term
-# "what's on today/tomorrow" view now, not a week-long list -- This Week
-# (WEEK_AHEAD_DAYS above) is the only place anything further out shows,
-# extreme value included, which is what gives the two tabs a clear,
-# distinct job without needing separate "crossover" logic.
-SPORT_TAB_DAYS_AHEAD = 1  # today + this many days -- 1 means day-of and day-after
+# Matches WEEK_AHEAD_DAYS -- see pwa/build_site.py's comment for why the
+# brief 1-day version got walked back same-day (EPL/NFL/NBL tabs were
+# going near-empty whenever their next game sat a few days out).
+SPORT_TAB_DAYS_AHEAD = WEEK_AHEAD_DAYS
 
 
 def _odds_range() -> tuple[float, float]:

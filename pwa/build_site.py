@@ -27,16 +27,17 @@ from models.team_names import build_nickname_index, resolve
 from tips.generate_tips import _finished_games_for_elo
 
 WEEK_AHEAD_DAYS = 14
-# Explicit feedback (2026-10-27): a sport's own tab should be the
-# near-term, "what's actually on today/tomorrow" view -- not a week-long
-# list that buries tonight's game under things five days out. This Week
-# (WEEK_AHEAD_DAYS above) stays the forward-looking, multi-day view;
-# anything beyond this window simply doesn't show on the sport tab at
-# all any more, which is also what gives This Week its distinct job --
-# it's now the ONLY place a pick more than a day out shows up, extreme
-# value included, with no separate "crossover" logic needed to make that
-# happen (narrowing the sport tab's own window already does it).
-SPORT_TAB_DAYS_AHEAD = 1  # today + this many days -- 1 means day-of and day-after
+# A sport's own tab briefly meant "just today/tomorrow" (2026-10-27,
+# narrowed to 1 day, This Week left as the only multi-day view) -- walked
+# back the same day on explicit follow-up: checked live and EPL/NFL/NBL's
+# tabs were going near-empty because their next games sit a few days out
+# (NFL games routinely ~6 days from a refresh, NBL's next game 3 days
+# out), and "I wanna see the other bets... good to see what ur thinking"
+# even for things that won't clear This Week's own bar. Matches
+# WEEK_AHEAD_DAYS now rather than a separate shorter window -- the two
+# views still differ (per-sport list vs. the cross-sport ranked feed),
+# just over the same date range.
+SPORT_TAB_DAYS_AHEAD = WEEK_AHEAD_DAYS
 RECOMMENDED_COUNT = 5
 MUST_BET_MIN_EDGE = 0.015
 MUST_BET_COUNT = 4

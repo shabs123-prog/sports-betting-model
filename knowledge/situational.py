@@ -94,6 +94,56 @@ def injury_notes(team_name: str, injuries: list[dict]) -> list[str]:
     return notes
 
 
+def plain_why_facts(
+    home_team: str, away_team: str, game_date: date, team_logs: dict,
+    home_injuries: list[dict] | None = None, away_injuries: list[dict] | None = None,
+) -> list[str]:
+    """Same underlying signals as generate_notes()/injury_notes(), but phrased
+    with zero numbers -- explicit feedback (2026-10-27): the card description
+    should lead with a plain-English reason, not a stat. Ordered most-to-
+    least concrete (a named injury beats a vague streak), so the caller can
+    just take facts[0] as "the" reason. Recomputes these from the same
+    already-fetched team_logs/injuries rather than reusing generate_notes()'s
+    rendered strings, so there's no number to strip out after the fact."""
+    facts = []
+    if home_injuries:
+        facts.append(f"{home_team} are without {home_injuries[0]['player']}")
+    if away_injuries:
+        facts.append(f"{away_team} are without {away_injuries[0]['player']}")
+
+    home_log = team_logs.get(home_team, [])
+    away_log = team_logs.get(away_team, [])
+    home_rest = rest_days(home_log, game_date)
+    away_rest = rest_days(away_log, game_date)
+    if home_rest == 1:
+        facts.append(f"{home_team} are playing on zero rest")
+    if away_rest == 1:
+        facts.append(f"{away_team} are playing on zero rest")
+    if home_rest is not None and away_rest is not None and abs(home_rest - away_rest) >= 2:
+        rested, tired = (home_team, away_team) if home_rest > away_rest else (away_team, home_team)
+        facts.append(f"{rested} have had more time to recover than {tired}")
+
+    home_form = recent_form(home_log, game_date)
+    away_form = recent_form(away_log, game_date)
+    if home_form["streak"] >= 5:
+        facts.append(f"{home_team} have been red-hot lately")
+    elif home_form["streak"] <= -5:
+        facts.append(f"{home_team} have been cold lately")
+    if away_form["streak"] >= 5:
+        facts.append(f"{away_team} have been red-hot lately")
+    elif away_form["streak"] <= -5:
+        facts.append(f"{away_team} have been cold lately")
+
+    home_split = home_away_split(home_log, game_date)
+    away_split = home_away_split(away_log, game_date)
+    if home_split["home_win_pct"] is not None and home_split["home_win_pct"] < 0.35:
+        facts.append(f"{home_team} haven't been good at home this season")
+    if away_split["away_win_pct"] is not None and away_split["away_win_pct"] > 0.65:
+        facts.append(f"{away_team} have been strong on the road this season")
+
+    return facts
+
+
 def generate_notes(home_team: str, away_team: str, game_date: date, team_logs: dict) -> list[str]:
     notes = []
     home_log = team_logs.get(home_team, [])

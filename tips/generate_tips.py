@@ -302,6 +302,36 @@ def _format_selection(outcome_name: str, point, market_key: str) -> str:
     return f"{outcome_name} {point:+g}"
 
 
+# Follow-up feedback, same day: a "summarised version... a sentence or 2
+# of why, with no numbers" to lead the card, ahead of the detailed
+# (numeric) sentence below -- takes the single most concrete situational
+# fact for this game (situational.plain_why_facts, already number-free by
+# construction) when one exists, otherwise a generic-but-true, tip-type-
+# specific reason. Deliberately doesn't fabricate a specific-sounding
+# reason when there isn't one -- most tips have no standout situational
+# angle, and a made-up-sounding one would be worse than an honest generic
+# line.
+def _plain_why(why_facts: list[str], fallback: str) -> str:
+    if why_facts:
+        fact = why_facts[0]
+        return f"{fact[0].upper()}{fact[1:]}."
+    return fallback
+
+
+_VALUE_WHY_FALLBACK = (
+    "The price here just doesn't match how these two sides actually stack up -- "
+    "gaps like that don't usually last long once enough money notices."
+)
+_PREDICTION_H2H_WHY_FALLBACK = (
+    "Our model simply rates this side a little higher than the market does right now "
+    "-- an early read, not a confirmed edge."
+)
+_PREDICTION_SCORING_WHY_FALLBACK = (
+    "Our scoring model sees this game playing out a little differently than the number "
+    "on the board suggests."
+)
+
+
 # Explicit feedback (2026-10-27): the card description was too technical/
 # jargon-heavy for a casual reader -- "no-vig fair probability", "price-
 # implied", bookmaker-benchmark names. The tier/risk badge already shown
@@ -406,7 +436,7 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
                 if devig_edge_pct < _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     continue
                 units = _kelly_units(fair_prob, decimal_odds, settings)
-                reasoning = _value_reasoning(fair_prob, decimal_odds, bookmaker)
+                reasoning = f"{_plain_why([], _VALUE_WHY_FALLBACK)} {_value_reasoning(fair_prob, decimal_odds, bookmaker)}"
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
@@ -480,6 +510,7 @@ def run(sport: str = "nba", log=print) -> dict:
 
         model_probs = {}
         notes = []
+        why_facts = []
         scoring_projection = None
         linked_bet = None  # best priced tip found for this game, attached to its Ball Knowledge note
         if cfg["has_history"]:
@@ -491,6 +522,7 @@ def run(sport: str = "nba", log=print) -> dict:
             model_probs = {home_odds_name: model_prob_home, away_odds_name: 1 - model_prob_home}
             game_date_obj = date.fromisoformat(game_date)
             notes = situational.generate_notes(home_team, away_team, game_date_obj, team_logs)
+            home_injuries, away_injuries = [], []
             for team_name in (home_team, away_team):
                 team_id = team_id_map.get(team_name)
                 if not team_id:
@@ -500,6 +532,13 @@ def run(sport: str = "nba", log=print) -> dict:
                         cfg["espn_sport"], cfg["espn_league"], team_id
                     )
                 notes.extend(situational.injury_notes(team_name, injury_cache[team_id]))
+                if team_name == home_team:
+                    home_injuries = injury_cache[team_id]
+                else:
+                    away_injuries = injury_cache[team_id]
+            why_facts = situational.plain_why_facts(
+                home_team, away_team, game_date_obj, team_logs, home_injuries, away_injuries
+            )
             scoring_projection = project_matchup(
                 scoring_averages.get(home_team), scoring_averages.get(away_team)
             )
@@ -585,7 +624,10 @@ def run(sport: str = "nba", log=print) -> dict:
                 # or sizes a stake -- that was a bug in an earlier version.
                 if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     units = _kelly_units(fair_prob, decimal_odds, settings)
-                    reasoning_parts = [_value_reasoning(fair_prob, decimal_odds, bookmaker)]
+                    reasoning_parts = [
+                        _plain_why(why_facts, _VALUE_WHY_FALLBACK),
+                        _value_reasoning(fair_prob, decimal_odds, bookmaker),
+                    ]
                     if model_prob is not None:
                         reasoning_parts.append(_elo_agreement_note(model_prob, fair_prob))
                     if outcome_name in (home_odds_name, away_odds_name) and notes:
@@ -656,7 +698,10 @@ def run(sport: str = "nba", log=print) -> dict:
                     max_units_override=PREDICTION_MAX_UNITS,
                     kelly_fraction_override=PREDICTION_KELLY_FRACTION,
                 )
-                reasoning_parts = [_h2h_lean_reasoning(outcome_name, model_prob)]
+                reasoning_parts = [
+                    _plain_why(why_facts, _PREDICTION_H2H_WHY_FALLBACK),
+                    _h2h_lean_reasoning(outcome_name, model_prob),
+                ]
                 if outcome_name in (home_odds_name, away_odds_name) and notes:
                     reasoning_parts.extend(notes)
                 db.insert_tip({
@@ -718,10 +763,13 @@ def run(sport: str = "nba", log=print) -> dict:
                 if decimal_odds > settings["max_single_odds"]:
                     pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "spreads")
-                reasoning_parts = [_spreads_lean_reasoning(
-                    selection,
-                    scoring_projection["home_projected"], scoring_projection["away_projected"],
-                )]
+                reasoning_parts = [
+                    _plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK),
+                    _spreads_lean_reasoning(
+                        selection,
+                        scoring_projection["home_projected"], scoring_projection["away_projected"],
+                    ),
+                ]
                 if outcome_name in (home_odds_name, away_odds_name) and notes:
                     reasoning_parts.extend(notes)
                 db.insert_tip({
@@ -767,7 +815,10 @@ def run(sport: str = "nba", log=print) -> dict:
                 if decimal_odds > settings["max_single_odds"]:
                     pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "totals")
-                reasoning_parts = [_totals_lean_reasoning(scoring_projection["projected_total"], point, wants_over)]
+                reasoning_parts = [
+                    _plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK),
+                    _totals_lean_reasoning(scoring_projection["projected_total"], point, wants_over),
+                ]
                 if notes:
                     reasoning_parts.extend(notes)
                 db.insert_tip({
