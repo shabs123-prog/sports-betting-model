@@ -1,0 +1,42 @@
+name: Results refresh (no odds pull)
+
+# daily-refresh.yml only runs once (6am AEDT) -- a game that finishes
+# LATER the same day doesn't get picked up by My Bets auto-grading until
+# the FOLLOWING day's run, since results only live in data.json and that
+# only gets rebuilt once a day. This is a separate, frequent, zero-cost
+# refresh that only rebuilds data.json (pure ESPN calls for results +
+# the local-clock "already started" cleanup) -- no odds pull, no Odds API
+# quota spent, no ODDS_API_KEY secret even needed -- so a same-day result
+# auto-grades the next time the app is opened instead of needing a manual
+# Win/Loss/Push.
+#
+# Deliberately does NOT call scripts.run_auto_refresh -- no odds pull
+# means no risk to the tips table, just a results/timestamp refresh.
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"  # every 3 hours -- adjust if you want results fresher/less often
+  workflow_dispatch: {}
+
+jobs:
+  refresh-results:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      - name: Rebuild PWA site data (results + already-started-game cleanup only)
+        run: python -m pwa.build_site
+
+      - name: Commit refreshed data (if anything actually changed)
+        run: |
+          git config user.name "tips-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -f tips.db docs/data.json
+          git diff --staged --quiet || git commit -m "Results refresh $(date -u +'%F %H:%M UTC')"
+          git push
