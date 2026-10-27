@@ -75,7 +75,15 @@ def build_this_week() -> dict:
         return abs(latest["fair_prob"] - first["fair_prob"])
 
     week_predictions = db.get_tips_in_range(today, week_end, tip_type="prediction")
-    model_leans = sorted(week_predictions, key=lambda t: -t["model_prob"])[:MODEL_LEANS_COUNT]
+    # Only Elo-based h2h predictions carry a model_prob -- the scoring-margin
+    # spreads/totals leans (models/scoring.py) project a point margin/total
+    # instead, which isn't on the same 0-1 scale and can't be ranked
+    # alongside a probability. They're not lost from the app: each sport's
+    # own Predictions tab still shows them (see render_sport_tab below) --
+    # just excluded from this specific cross-sport "most confident" ranking,
+    # which only makes sense for a genuine probability.
+    leanable = [t for t in week_predictions if t["model_prob"] is not None]
+    model_leans = sorted(leanable, key=lambda t: -t["model_prob"])[:MODEL_LEANS_COUNT]
 
     result = {
         "must_bet": [],

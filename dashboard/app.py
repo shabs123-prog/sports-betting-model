@@ -333,7 +333,12 @@ with tab_week:
         # of bets a week doesn't have to come from value tips alone.
         st.divider()
         week_predictions = db.get_tips_in_range(today_str, week_end_str, tip_type="prediction")
-        top_predictions = sorted(week_predictions, key=lambda t: -t["model_prob"])[:MODEL_LEANS_COUNT]
+        # Scoring-margin spreads/totals leans (models/scoring.py) have no
+        # model_prob -- they project a point margin/total, not a
+        # probability, so they can't be ranked on this 0-1 scale. Excluded
+        # here, not lost: each sport's own tab still shows them.
+        leanable_predictions = [t for t in week_predictions if t["model_prob"] is not None]
+        top_predictions = sorted(leanable_predictions, key=lambda t: -t["model_prob"])[:MODEL_LEANS_COUNT]
         st.subheader(f"This week's model leans ({len(top_predictions)})")
         st.caption(
             "No confirmed market edge -- the model just favours this side over the price. "
