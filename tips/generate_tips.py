@@ -75,7 +75,12 @@ LONGSHOT_UNIT_CAP = 0.75
 # already in the Settings tab (previously unused by the pipeline) rather
 # than inventing new config.
 KELLY_FRACTION = 0.25
-MIN_UNITS = 0.25  # floor so a very marginal Kelly fraction doesn't round to noise
+# Explicit feedback (2026-10-27, follow-up): 0.5u is the floor for "risky
+# longshot, but I think it has a chance" -- not a number below that.
+# Raised from 0.25 (which some real picks were landing under) to match.
+# Kelly still drives everything above this floor continuously; this only
+# clips the bottom, same as settings["max_units"] clips the top.
+MIN_UNITS = 0.5
 
 
 def _kelly_units(fair_prob: float, decimal_odds: float, settings: dict) -> float:
