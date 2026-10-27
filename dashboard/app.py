@@ -14,9 +14,6 @@ from config import (
     DEFAULT_MAX_UNITS_PER_BET,
     DEFAULT_MIN_EDGE_PCT,
     DEFAULT_MIN_SINGLE_ODDS,
-    DEFAULT_TIER_UNITS_LEAN,
-    DEFAULT_TIER_UNITS_MODERATE,
-    DEFAULT_TIER_UNITS_STRONG,
     DEFAULT_UNIT_SIZE_PCT,
     SPORT_CONFIG,
     USER_BOOKMAKERS,
@@ -618,16 +615,15 @@ with tab_settings:
     bankroll = st.number_input("Bankroll ($)", min_value=0.0, value=float(db.get_setting("bankroll_amount", str(DEFAULT_BANKROLL_AMOUNT))), step=50.0)
     unit_pct = st.number_input("Unit size (% of bankroll)", min_value=0.1, max_value=10.0, value=float(db.get_setting("unit_size_pct", str(DEFAULT_UNIT_SIZE_PCT))) * 100, step=0.1) / 100
 
-    st.subheader("Stake size by edge tier")
-    st.caption("A fixed unit count per tier, not a continuously-scaled fraction — bigger edge, bigger round number.")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        tier_strong = st.number_input("Strong edge (≥3%)", min_value=0.25, value=float(db.get_setting("tier_units_strong", str(DEFAULT_TIER_UNITS_STRONG))), step=0.25)
-    with c2:
-        tier_moderate = st.number_input("Moderate edge (1.5-3%)", min_value=0.25, value=float(db.get_setting("tier_units_moderate", str(DEFAULT_TIER_UNITS_MODERATE))), step=0.25)
-    with c3:
-        tier_lean = st.number_input("Lean edge (below 1.5%)", min_value=0.25, value=float(db.get_setting("tier_units_lean", str(DEFAULT_TIER_UNITS_LEAN))), step=0.25)
-    max_units = st.number_input("Max units per bet (hard cap, overrides the above)", min_value=0.5, value=float(db.get_setting("max_units_per_bet", str(DEFAULT_MAX_UNITS_PER_BET))), step=0.5)
+    st.subheader("Stake size")
+    st.caption(
+        "Continuous, not a fixed number per edge tier (changed 2026-10-27) -- "
+        "tips/generate_tips.py now sizes every tip with quarter-Kelly "
+        "(models/kelly.py), a function of both the fair probability "
+        "(likelihood of hitting) and the price, using the Bankroll/Unit "
+        "size settings above. The cap below still applies on top."
+    )
+    max_units = st.number_input("Max units per bet (hard cap)", min_value=0.5, value=float(db.get_setting("max_units_per_bet", str(DEFAULT_MAX_UNITS_PER_BET))), step=0.5)
     min_edge = st.slider("Minimum edge to flag a tip", 0.0, 0.2, float(db.get_setting("min_edge_pct", str(DEFAULT_MIN_EDGE_PCT))), 0.005, format="%.1f%%")
 
     st.subheader("Odds range")
@@ -655,9 +651,6 @@ with tab_settings:
     if st.button("Save settings"):
         db.set_setting("bankroll_amount", bankroll)
         db.set_setting("unit_size_pct", unit_pct)
-        db.set_setting("tier_units_strong", tier_strong)
-        db.set_setting("tier_units_moderate", tier_moderate)
-        db.set_setting("tier_units_lean", tier_lean)
         db.set_setting("max_units_per_bet", max_units)
         db.set_setting("min_edge_pct", min_edge)
         db.set_setting("min_single_odds", min_single_odds)

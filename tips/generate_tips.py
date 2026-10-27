@@ -11,13 +11,12 @@ from zoneinfo import ZoneInfo
 
 from config import (
     AU_BOOKMAKERS,
+    DEFAULT_BANKROLL_AMOUNT,
     DEFAULT_MAX_SINGLE_ODDS,
     DEFAULT_MAX_UNITS_PER_BET,
     DEFAULT_MIN_EDGE_PCT,
     DEFAULT_MIN_SINGLE_ODDS,
-    DEFAULT_TIER_UNITS_LEAN,
-    DEFAULT_TIER_UNITS_MODERATE,
-    DEFAULT_TIER_UNITS_STRONG,
+    DEFAULT_UNIT_SIZE_PCT,
     EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS,
     SECONDARY_SHARP_REFERENCE_BOOKMAKER,
     SHARP_REFERENCE_BOOKMAKER,
@@ -30,6 +29,7 @@ from db import database as db
 from knowledge import situational
 from models import edge, elo
 from models.devig import devig_book
+from models.kelly import suggested_stake
 from models.risk import risk_label
 from models.scoring import build_scoring_averages, project_matchup
 from models.team_names import build_nickname_index, resolve
@@ -46,11 +46,8 @@ def _load_staking_settings() -> dict:
         "min_edge_pct": _get_float_setting("min_edge_pct", DEFAULT_MIN_EDGE_PCT),
         "max_single_odds": _get_float_setting("max_single_odds", DEFAULT_MAX_SINGLE_ODDS),
         "min_single_odds": _get_float_setting("min_single_odds", DEFAULT_MIN_SINGLE_ODDS),
-        "tier_units": {
-            "Strong": _get_float_setting("tier_units_strong", DEFAULT_TIER_UNITS_STRONG),
-            "Moderate": _get_float_setting("tier_units_moderate", DEFAULT_TIER_UNITS_MODERATE),
-            "Lean": _get_float_setting("tier_units_lean", DEFAULT_TIER_UNITS_LEAN),
-        },
+        "bankroll_amount": _get_float_setting("bankroll_amount", DEFAULT_BANKROLL_AMOUNT),
+        "unit_size_pct": _get_float_setting("unit_size_pct", DEFAULT_UNIT_SIZE_PCT),
     }
 
 
@@ -63,31 +60,34 @@ def _load_staking_settings() -> dict:
 # default (0.75) -- a longshot shouldn't outsize the lowest-confidence tier.
 LONGSHOT_UNIT_CAP = 0.75
 
-# Explicit feedback (2026-10-27): a pick that's more likely to hit should
-# size up toward 2u regardless of how thin its market edge is -- a small
-# detected mispricing on a genuine 65%+ chance is still a real, fundable
-# bet, not a lesser one just because the edge tier label says "Lean".
-# Risk band (models.risk.risk_label -- a win-probability band, literally
-# "how likely is this to hit") is now the PRIMARY driver of stake size;
-# edge tier only adds a bonus on top for a Strong (>=3%) edge, rewarding
-# the rare case where a pick is both likely to land AND a big mispricing,
-# without ever shrinking a pick for having a merely-Lean edge. The one
-# thing this doesn't change: a pick still needs genuine positive edge to
-# become a tip at all (see the min-edge check above) -- "likely to hit"
-# alone, with no real mispricing, still isn't a bet, just a correctly
-# -priced favourite with nothing to gain from backing it.
-RISK_BASE_UNITS = {"Not Risky": 2.0, "Neutral": 1.25, "Risky": 0.5}
-STRONG_EDGE_BONUS = 0.75
-MIN_UNITS = 0.5
+# Explicit feedback (2026-10-27): units don't need to land on round
+# numbers like 1.5/2.5 any more -- size continuously, as long as it
+# reflects both how likely the pick is to hit AND the market edge.
+# Fractional Kelly (models/kelly.py, previously built but unused) is
+# literally that formula -- a function of fair probability (likelihood
+# of hitting) and price (which, combined with fair probability, IS the
+# edge) in one continuous number, instead of two separate inputs
+# bucketed into a table. Quarter-Kelly (0.25), not full Kelly -- full
+# Kelly is notoriously high-variance (it punishes overestimated
+# probability/edge hard, and no real-world probability estimate is
+# perfectly certain); quarter-Kelly is a standard, conservative fraction
+# for exactly that uncertainty. Uses the bankroll/unit-size settings
+# already in the Settings tab (previously unused by the pipeline) rather
+# than inventing new config.
+KELLY_FRACTION = 0.25
+MIN_UNITS = 0.25  # floor so a very marginal Kelly fraction doesn't round to noise
 
 
-def _tier_units(tier: str, risk: str, decimal_odds: float, settings: dict) -> float:
-    units = RISK_BASE_UNITS.get(risk, RISK_BASE_UNITS["Neutral"])
-    if tier == "Strong":
-        units += STRONG_EDGE_BONUS
+def _kelly_units(fair_prob: float, decimal_odds: float, settings: dict) -> float:
+    result = suggested_stake(
+        fair_prob, decimal_odds,
+        settings["bankroll_amount"], settings["unit_size_pct"],
+        KELLY_FRACTION, settings["max_units"],
+    )
+    units = result["units"]
     if decimal_odds > settings["max_single_odds"]:
         units = min(units, LONGSHOT_UNIT_CAP)
-    return round(max(MIN_UNITS, min(units, settings["max_units"])), 2)
+    return round(max(MIN_UNITS, units), 2)
 
 
 # Model Elo is draw-aware for exactly zero of the sports configured so far --
@@ -108,26 +108,28 @@ PREDICTION_MIN_MODEL_PROB = 0.55
 PREDICTION_LEAN_MIN_GAP_PCT = 0.015
 
 
-def _scoring_lean_risk(gap: float, threshold: float) -> str:
-    """
-    The scoring-margin model (spreads/totals leans) has no clean win
-    probability to bucket with models.risk.risk_label -- just a points
-    gap over the min-gap bar. This is the same "how confident is this"
-    idea applied to that gap instead: comfortably clear of the bar (2.5x+)
-    reads as Not Risky, barely clearing it reads as Risky, same spirit as
-    risk_label's probability bands. Used only to size these leans (see
-    RISK_BASE_UNITS) -- explicit feedback was "closer to game, model
-    thinks it'll hit, more units," which needs real variation here too,
-    not just on the Elo-based h2h predictions below.
-    """
+# The scoring-margin model (spreads/totals leans) has no clean win
+# probability to feed into Kelly -- just a points gap over the min-gap
+# bar. This is a continuous proxy for the same idea: scales smoothly
+# with how many multiples of that bar the projection clears, rather than
+# snapping to a 3-bucket label. Capped below a real value tip's ceiling
+# on purpose -- this is explicitly a rougher model (see its own
+# reasoning text), shouldn't out-stake a genuine detected market edge.
+SCORING_LEAN_MAX_UNITS = 2.0
+SCORING_LEAN_RATIO_CEILING = 3.0  # ratio at/above which it maxes out
+
+
+def _scoring_lean_units(gap: float, threshold: float) -> float:
     if threshold <= 0:
-        return "Neutral"
+        return MIN_UNITS
     ratio = gap / threshold
-    if ratio >= 2.5:
-        return "Not Risky"
-    if ratio >= 1.3:
-        return "Neutral"
-    return "Risky"
+    if ratio <= 1.0:
+        return MIN_UNITS
+    if ratio >= SCORING_LEAN_RATIO_CEILING:
+        return SCORING_LEAN_MAX_UNITS
+    span = SCORING_LEAN_RATIO_CEILING - 1.0
+    units = MIN_UNITS + (ratio - 1.0) / span * (SCORING_LEAN_MAX_UNITS - MIN_UNITS)
+    return round(units, 2)
 
 
 def _espn_season_years(sport: str) -> list[int]:
@@ -263,7 +265,7 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
                     continue
                 tier = edge.tier_label(devig_edge_pct)
                 risk = risk_label(fair_prob)
-                units = _tier_units(tier, risk, decimal_odds, settings)
+                units = _kelly_units(fair_prob, decimal_odds, settings)
                 reasoning = (
                     f"[{tier} edge · {risk}] No-vig fair probability (AU consensus): {fair_prob:.1%} "
                     f"vs price-implied {1/decimal_odds:.1%} ({devig_edge_pct:+.1%} edge) at {bookmaker}."
@@ -447,7 +449,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     tier = edge.tier_label(devig_edge_pct)
                     risk = risk_label(fair_prob)
-                    units = _tier_units(tier, risk, decimal_odds, settings)
+                    units = _kelly_units(fair_prob, decimal_odds, settings)
                     reasoning_parts = [
                         f"[{tier} edge · {risk}] No-vig fair probability ({fair_prob_source}): {fair_prob:.1%} "
                         f"vs price-implied {1/decimal_odds:.1%} ({devig_edge_pct:+.1%} edge) at {bookmaker}.",
@@ -524,11 +526,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 implied_prob = 1.0 / decimal_odds
                 if model_prob < implied_prob:
                     continue  # model doesn't even think this price is fair, let alone a lean
-                pred_risk = risk_label(model_prob)
-                pred_units = min(
-                    RISK_BASE_UNITS.get(pred_risk, RISK_BASE_UNITS["Neutral"]),
-                    LONGSHOT_UNIT_CAP if decimal_odds > settings["max_single_odds"] else settings["max_units"],
-                )
+                pred_units = _kelly_units(model_prob, decimal_odds, settings)
                 reasoning_parts = [
                     f"[Model prediction — no confirmed market edge] Elo gives {outcome_name} a "
                     f"{model_prob:.1%} chance, above the {implied_prob:.1%} the price implies, "
@@ -593,11 +591,9 @@ def run(sport: str = "nba", log=print) -> dict:
                 decimal_odds = price_info["price"]
                 if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
                     continue
-                pred_risk = _scoring_lean_risk(gap, threshold)
-                pred_units = min(
-                    RISK_BASE_UNITS.get(pred_risk, RISK_BASE_UNITS["Neutral"]),
-                    LONGSHOT_UNIT_CAP if decimal_odds > settings["max_single_odds"] else settings["max_units"],
-                )
+                pred_units = _scoring_lean_units(gap, threshold)
+                if decimal_odds > settings["max_single_odds"]:
+                    pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "spreads")
                 reasoning_parts = [
                     f"[Model prediction — no confirmed market edge] Points-scored/allowed "
@@ -648,11 +644,9 @@ def run(sport: str = "nba", log=print) -> dict:
                 decimal_odds = price_info["price"]
                 if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
                     continue
-                pred_risk = _scoring_lean_risk(gap, threshold)
-                pred_units = min(
-                    RISK_BASE_UNITS.get(pred_risk, RISK_BASE_UNITS["Neutral"]),
-                    LONGSHOT_UNIT_CAP if decimal_odds > settings["max_single_odds"] else settings["max_units"],
-                )
+                pred_units = _scoring_lean_units(gap, threshold)
+                if decimal_odds > settings["max_single_odds"]:
+                    pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "totals")
                 reasoning_parts = [
                     f"[Model prediction — no confirmed market edge] Points-scored/allowed "

@@ -259,6 +259,17 @@ function renderSport(sport) {
   if (!s.auto_refresh) {
     html += `<p class="caption">Not auto-refreshed daily (off-season or markets not posted yet).</p>`;
   }
+  // This tab is deliberately day-of/day-after only (see This Week for
+  // anything further out) -- a sport that doesn't play daily (EPL, NFL,
+  // NRL, AFL...) will often have nothing here most days, which reads as
+  // "broken" without this note. Checked before the sections below so it
+  // shows even when has_history is false.
+  const nothingHereAtAll =
+    !s.value_in_range.length && !s.value_outside_range.length &&
+    !s.predictions.length && !s.knowledge.length;
+  if (nothingHereAtAll) {
+    html += `<div class="info-box">Nothing on today or tomorrow for this sport right now — this tab is just the next two days. Anything further out shows on This Week instead.</div>`;
+  }
 
   html += `<section><h2>Value Bets</h2>`;
   html += s.value_in_range.length

@@ -35,21 +35,14 @@ DEFAULT_UNIT_SIZE_PCT = float(_get_secret("UNIT_SIZE_PCT", "0.01"))
 DEFAULT_MAX_UNITS_PER_BET = float(_get_secret("MAX_UNITS_PER_BET", "3"))
 DEFAULT_MIN_EDGE_PCT = float(_get_secret("MIN_EDGE_PCT", "0.0075"))
 
-# Stake size by edge tier (see models.edge.tier_label) -- a round, fixed
-# unit count per tier rather than a continuously-scaled Kelly fraction.
-# Bigger and more intuitive than "0.39 units", still grounded in how
-# confident the edge is. Each is capped by max_units_per_bet regardless.
-# These three are the tier's "Neutral" risk-band midpoint, not the final
-# number shown -- tips/generate_tips.RISK_UNIT_MULTIPLIER scales each one
-# up or down from here based on win-probability band too (see
-# models.risk.risk_label), spreading the real range to roughly 0.5-3.0.
-DEFAULT_TIER_UNITS_STRONG = float(_get_secret("TIER_UNITS_STRONG", "2.5"))
-DEFAULT_TIER_UNITS_MODERATE = float(_get_secret("TIER_UNITS_MODERATE", "1.75"))
-# Explicit feedback: usually prefers 1-2u for most bets (Moderate=1.75 already
-# fits), 2.5-3u only for very confident/big-edge picks (Strong=2.5 already
-# fits) -- 0.75 is fine for Lean specifically ("0.5 and 0.75 i dont mind"),
-# since that's the lowest-confidence tier and should sit below the 1-2u norm.
-DEFAULT_TIER_UNITS_LEAN = float(_get_secret("TIER_UNITS_LEAN", "0.75"))
+# Stake size: a round, fixed unit count per edge tier used to live here
+# (DEFAULT_TIER_UNITS_STRONG/MODERATE/LEAN) -- replaced 2026-10-27 by
+# quarter-Kelly stake sizing (tips/generate_tips._kelly_units,
+# models/kelly.py), driven by the bankroll/unit-size settings below
+# instead of fixed per-tier numbers. Explicit feedback: units shouldn't
+# be snapped to round values at all, should continuously reflect both
+# likelihood of hitting and the market edge -- which is literally what
+# the Kelly formula already is.
 
 # Hard range on single-bet odds shown in the main "Value Bets"/"Predictions"
 # views -- not a soft discount zone, an actual floor and ceiling. Tips
