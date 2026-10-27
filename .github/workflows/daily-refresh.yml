@@ -22,7 +22,13 @@ name: Daily tips refresh
 
 on:
   schedule:
-    - cron: "0 19 * * *"  # ~6am AEDT / 5am AEST -- adjust for your timezone/DST
+    - cron: "0 19 * * *"  # ~6am AEDT / 5am AEST -- full refresh, all auto_refresh sports
+    # NBA-only, ~6pm AEDT/5pm AEST the evening BEFORE game day -- NBA plays
+    # daily (unlike EPL/NFL), and explicit feedback is that 6am data is too
+    # early relative to when bets actually get placed (the evening before).
+    # Adds only ~6 credits/day (1 sport's bulk pull) -- affordable with 3
+    # keys/1500 a month now, wasn't with 2/1000.
+    - cron: "0 7 * * *"   # ~6pm AEDT / 5pm AEST
   workflow_dispatch:
     inputs:
       sport:
@@ -52,25 +58,20 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Scheduled runs have no "sport" input (defaults to "all", same as
-      # before -- every auto_refresh=True sport). A manual run from the
-      # Actions tab lets you pick one sport instead, e.g. right before you
-      # actually want to look at tonight's picks, rather than always
-      # paying for every configured sport whether you're checking it or
-      # not -- bypasses the auto_refresh flag too, so you can manually
-      # check an off-season sport if you want (checked live: a sport with
-      # zero events costs 0 quota regardless of markets/regions
-      # requested, so this is really about not re-pulling sports you
-      # don't care about right now, not about off-season sports costing
-      # anything -- they don't).
+      # Which sport(s) to refresh, in priority order: a manual "sport" input
+      # wins if present; otherwise the 6pm cron (github.event.schedule
+      # equals its own cron string) means NBA only; otherwise (the 6am
+      # cron, or anything else) means "all", same as the original
+      # single-schedule behaviour.
       - name: Refresh sport(s)
-        run: python -m scripts.run_auto_refresh "${{ github.event.inputs.sport || 'all' }}"
+        run: python -m scripts.run_auto_refresh "${{ github.event.inputs.sport || (github.event.schedule == '0 7 * * *' && 'nba' || 'all') }}"
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          # Optional second free-tier key -- data/odds_api.py falls over to
-          # it automatically once the first one's monthly quota is used up.
-          # Safe to leave unset (secrets.ODDS_API_KEY_2 just resolves empty).
+          # Optional additional free-tier keys -- data/odds_api.py falls
+          # over to the next one automatically once the current one's
+          # monthly quota is used up. Safe to leave unset.
           ODDS_API_KEY_2: ${{ secrets.ODDS_API_KEY_2 }}
+          ODDS_API_KEY_3: ${{ secrets.ODDS_API_KEY_3 }}
 
       - name: Build PWA site data
         run: python -m pwa.build_site

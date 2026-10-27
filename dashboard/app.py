@@ -405,42 +405,6 @@ with tab_week:
     else:
         st.info("No value tips for the week yet — refresh sports from their own tabs.")
 
-    # Line Movement goes last -- it's supplementary context (and often just
-    # "check back in a few days" while history is cold-starting), so it
-    # shouldn't push the actually-actionable Must-Bet/Recommended lists
-    # further down the page.
-    st.divider()
-    st.subheader("Line Movement")
-    st.caption(
-        "Every pipeline run records each line's fair probability (and point, for Line/Handicap) "
-        "so a genuine move — e.g. a total posted at 192.5 drifting to 190.5 — becomes visible "
-        "over time, not just a single snapshot. Needs a few days of history before anything "
-        "shows up here; empty at first means it just started tracking, not that it's broken."
-    )
-    moved_lines = db.get_moved_lines(today_str, week_end_str)
-    if not moved_lines:
-        st.info("No line has 2+ days of tracked history yet — check back in a few days.")
-    else:
-        def _movement_size(m):
-            first, latest = m["first"], m["latest"]
-            if first["point"] is not None and latest["point"] is not None:
-                return abs(latest["point"] - first["point"])
-            return abs(latest["fair_prob"] - first["fair_prob"])
-
-        for m in sorted(moved_lines, key=_movement_size, reverse=True)[:10]:
-            first, latest = m["first"], m["latest"]
-            with st.container(border=True):
-                st.markdown(f"**{m['sport'].upper()}: {m['matchup']}** · {_fmt_when(m)}")
-                label = MARKET_LABEL.get(m["market"], m["market"])
-                if first["point"] is not None:
-                    st.markdown(f"{label} · {m['outcome']}: **{first['point']:g} → {latest['point']:g}**")
-                else:
-                    st.markdown(
-                        f"{label} · {m['outcome']}: fair probability "
-                        f"**{first['fair_prob']:.1%} → {latest['fair_prob']:.1%}**"
-                    )
-                st.caption(f"Tracked over {m['days_tracked']} day(s), {m['snapshot_count']} snapshot(s).")
-
 # ---------------------------------------------------------------- Per-sport tabs
 for sport, tab in zip(sport_tab_names, sport_tabs):
     with tab:

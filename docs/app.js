@@ -140,23 +140,6 @@ function comboCard(c) {
     </div>`;
 }
 
-function lineMoveCard(m) {
-  const { first, latest } = m;
-  let moveLine;
-  if (first.point !== null && first.point !== undefined) {
-    moveLine = `${escapeHtml(marketLabel(m.market))} · ${escapeHtml(m.outcome)}: <b>${first.point} → ${latest.point}</b>`;
-  } else {
-    moveLine = `${escapeHtml(marketLabel(m.market))} · ${escapeHtml(m.outcome)}: fair probability <b>${(first.fair_prob * 100).toFixed(1)}% → ${(latest.fair_prob * 100).toFixed(1)}%</b>`;
-  }
-  return `
-    <div class="card">
-      <div class="matchup">${escapeHtml(m.sport.toUpperCase())}: ${escapeHtml(m.matchup)}</div>
-      <div class="date">${escapeHtml(fmtWhen(m))}</div>
-      <div class="pick-line">${moveLine}</div>
-      <div class="caption" style="margin-top:6px;">Tracked over ${m.days_tracked} day(s), ${m.snapshot_count} snapshot(s).</div>
-    </div>`;
-}
-
 function expander(label, bodyHtml) {
   return `<details class="expander"><summary>${escapeHtml(label)}</summary><div class="expander-body">${bodyHtml}</div></details>`;
 }
@@ -215,19 +198,6 @@ function renderThisWeek() {
       <p class="caption">Different markets, same game, same bookmaker. Marked approximate — legs are correlated, not independently verified.</p>
       ${comboGroup(tw.sgms)}</section>`;
   }
-
-  // Line Movement goes last -- supplementary context (and often just "check
-  // back in a few days" while history cold-starts), so it shouldn't push
-  // the actually-actionable lists above further down the screen.
-  html += `<section>
-    <h2>Line Movement</h2>
-    <p class="caption">Every pipeline run records each line's fair probability (and point, for Line/Handicap) so a genuine move — e.g. a total posted at 192.5 drifting to 190.5 — becomes visible over time. Needs a few days of history before anything shows up; empty at first just means it started tracking.</p>`;
-  if (!tw.line_movement.length) {
-    html += `<div class="info-box">No line has 2+ days of tracked history yet — check back in a few days.</div>`;
-  } else {
-    html += tw.line_movement.map(lineMoveCard).join("");
-  }
-  html += `</section>`;
 
   return html;
 }

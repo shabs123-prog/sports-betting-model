@@ -308,35 +308,3 @@ def get_line_history(sport: str, matchup: str, game_date: str, market: str, outc
         return [dict(r) for r in rows]
 
 
-def get_moved_lines(min_game_date: str, max_game_date: str):
-    """
-    Every (sport, matchup, game_date, market, outcome) with line_history
-    rows spanning 2+ distinct calendar days, for games between the given
-    dates -- the earliest and latest snapshot of each. Empty until enough
-    days of history have accumulated; that's expected, not a bug.
-    """
-    with get_conn() as conn:
-        rows = conn.execute(
-            """SELECT * FROM line_history
-               WHERE game_date >= ? AND game_date <= ?
-               ORDER BY sport, matchup, game_date, market, outcome, recorded_at ASC""",
-            (min_game_date, max_game_date),
-        ).fetchall()
-    grouped: dict[tuple, list[dict]] = {}
-    for row in rows:
-        key = (row["sport"], row["matchup"], row["game_date"], row["market"], row["outcome"])
-        grouped.setdefault(key, []).append(dict(row))
-
-    moved = []
-    for key, snaps in grouped.items():
-        distinct_days = {s["recorded_at"][:10] for s in snaps}
-        if len(distinct_days) < 2:
-            continue
-        sport, matchup, game_date, market, outcome = key
-        moved.append({
-            "sport": sport, "matchup": matchup, "game_date": game_date,
-            "market": market, "outcome": outcome,
-            "first": snaps[0], "latest": snaps[-1], "snapshot_count": len(snaps),
-            "days_tracked": len(distinct_days),
-        })
-    return moved

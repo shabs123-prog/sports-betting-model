@@ -63,27 +63,28 @@ def _load_staking_settings() -> dict:
 # default (0.75) -- a longshot shouldn't outsize the lowest-confidence tier.
 LONGSHOT_UNIT_CAP = 0.75
 
-# Edge tier (how big the mispricing is) stays the dominant axis, but within
-# a tier the risk band (models.risk.risk_label -- a win-probability band,
-# i.e. literally "how likely is this to hit") now scales the stake up or
-# down: a big-edge pick that's also likely to land earns the top of its
-# tier's range, a big-edge pick that's still a near-coinflip earns the
-# bottom. Multiplicative against the three tier_units settings (not a
-# flat table) so it stays correct if those get tuned later, rounded to the
-# nearest quarter-unit for the same "round, intuitive number" reasoning as
-# the base tiers. Explicit feedback: usually 1-2u for most bets, 2.5-3u
-# only for very confident/big-edge picks, 0.5-0.75 fine for lower
-# confidence -- against the current Strong=2.5/Moderate=1.75/Lean=0.75
-# defaults this lands almost exactly on that (full spread: Strong
-# 1.75-3.0, Moderate 1.25-2.0, Lean 0.5-1.0).
-RISK_UNIT_MULTIPLIER = {"Not Risky": 1.2, "Neutral": 1.0, "Risky": 2 / 3}
+# Explicit feedback (2026-10-27): a pick that's more likely to hit should
+# size up toward 2u regardless of how thin its market edge is -- a small
+# detected mispricing on a genuine 65%+ chance is still a real, fundable
+# bet, not a lesser one just because the edge tier label says "Lean".
+# Risk band (models.risk.risk_label -- a win-probability band, literally
+# "how likely is this to hit") is now the PRIMARY driver of stake size;
+# edge tier only adds a bonus on top for a Strong (>=3%) edge, rewarding
+# the rare case where a pick is both likely to land AND a big mispricing,
+# without ever shrinking a pick for having a merely-Lean edge. The one
+# thing this doesn't change: a pick still needs genuine positive edge to
+# become a tip at all (see the min-edge check above) -- "likely to hit"
+# alone, with no real mispricing, still isn't a bet, just a correctly
+# -priced favourite with nothing to gain from backing it.
+RISK_BASE_UNITS = {"Not Risky": 2.0, "Neutral": 1.25, "Risky": 0.5}
+STRONG_EDGE_BONUS = 0.75
 MIN_UNITS = 0.5
 
 
 def _tier_units(tier: str, risk: str, decimal_odds: float, settings: dict) -> float:
-    base = settings["tier_units"].get(tier, settings["tier_units"]["Lean"])
-    units = base * RISK_UNIT_MULTIPLIER.get(risk, 1.0)
-    units = round(units * 4) / 4  # nearest quarter-unit
+    units = RISK_BASE_UNITS.get(risk, RISK_BASE_UNITS["Neutral"])
+    if tier == "Strong":
+        units += STRONG_EDGE_BONUS
     if decimal_odds > settings["max_single_odds"]:
         units = min(units, LONGSHOT_UNIT_CAP)
     return round(max(MIN_UNITS, min(units, settings["max_units"])), 2)
@@ -99,15 +100,34 @@ def _tier_units(tier: str, risk: str, decimal_odds: float, settings: dict) -> fl
 # model of the market in the first place.
 PREDICTION_ELIGIBLE_SPORTS = {"nba", "nbl", "nfl", "afl"}
 PREDICTION_MIN_MODEL_PROB = 0.55
-# No confirmed market edge at all (lower confidence than even a Lean value
-# tip, which has a real-if-small detected edge) -- shouldn't out-stake Lean.
-PREDICTION_UNITS = 0.75
 # How far the points-scored/allowed projection has to clear a spreads/totals
 # line (as a fraction of the projected total) before it's worth a lean --
 # same idea as a value tip's min-edge bar, just applied to a points gap
 # instead of a probability gap. Not sport-specific (NBA totals ~220,
 # NFL ~45) since it scales with the projection itself.
 PREDICTION_LEAN_MIN_GAP_PCT = 0.015
+
+
+def _scoring_lean_risk(gap: float, threshold: float) -> str:
+    """
+    The scoring-margin model (spreads/totals leans) has no clean win
+    probability to bucket with models.risk.risk_label -- just a points
+    gap over the min-gap bar. This is the same "how confident is this"
+    idea applied to that gap instead: comfortably clear of the bar (2.5x+)
+    reads as Not Risky, barely clearing it reads as Risky, same spirit as
+    risk_label's probability bands. Used only to size these leans (see
+    RISK_BASE_UNITS) -- explicit feedback was "closer to game, model
+    thinks it'll hit, more units," which needs real variation here too,
+    not just on the Elo-based h2h predictions below.
+    """
+    if threshold <= 0:
+        return "Neutral"
+    ratio = gap / threshold
+    if ratio >= 2.5:
+        return "Not Risky"
+    if ratio >= 1.3:
+        return "Neutral"
+    return "Risky"
 
 
 def _espn_season_years(sport: str) -> list[int]:
@@ -504,6 +524,11 @@ def run(sport: str = "nba", log=print) -> dict:
                 implied_prob = 1.0 / decimal_odds
                 if model_prob < implied_prob:
                     continue  # model doesn't even think this price is fair, let alone a lean
+                pred_risk = risk_label(model_prob)
+                pred_units = min(
+                    RISK_BASE_UNITS.get(pred_risk, RISK_BASE_UNITS["Neutral"]),
+                    LONGSHOT_UNIT_CAP if decimal_odds > settings["max_single_odds"] else settings["max_units"],
+                )
                 reasoning_parts = [
                     f"[Model prediction — no confirmed market edge] Elo gives {outcome_name} a "
                     f"{model_prob:.1%} chance, above the {implied_prob:.1%} the price implies, "
@@ -525,7 +550,7 @@ def run(sport: str = "nba", log=print) -> dict:
                     "model_prob": model_prob,
                     "market_fair_prob": None,
                     "edge_pct": None,
-                    "suggested_units": PREDICTION_UNITS,
+                    "suggested_units": pred_units,
                     "tip_type": "prediction",
                     "reasoning": " ".join(reasoning_parts),
                 })
@@ -539,7 +564,7 @@ def run(sport: str = "nba", log=print) -> dict:
                         "selection": outcome_name,
                         "bookmaker": price_info["bookmaker"],
                         "odds_decimal": decimal_odds,
-                        "suggested_units": PREDICTION_UNITS,
+                        "suggested_units": pred_units,
                         "edge_pct": -1.0,
                     }
 
@@ -562,11 +587,17 @@ def run(sport: str = "nba", log=print) -> dict:
                 else:
                     continue
                 gap = team_margin + point  # how much the model has this side covering by
-                if gap < scoring_projection["projected_total"] * PREDICTION_LEAN_MIN_GAP_PCT:
+                threshold = scoring_projection["projected_total"] * PREDICTION_LEAN_MIN_GAP_PCT
+                if gap < threshold:
                     continue
                 decimal_odds = price_info["price"]
                 if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
                     continue
+                pred_risk = _scoring_lean_risk(gap, threshold)
+                pred_units = min(
+                    RISK_BASE_UNITS.get(pred_risk, RISK_BASE_UNITS["Neutral"]),
+                    LONGSHOT_UNIT_CAP if decimal_odds > settings["max_single_odds"] else settings["max_units"],
+                )
                 selection = _format_selection(outcome_name, point, "spreads")
                 reasoning_parts = [
                     f"[Model prediction — no confirmed market edge] Points-scored/allowed "
@@ -590,7 +621,7 @@ def run(sport: str = "nba", log=print) -> dict:
                     "model_prob": None,
                     "market_fair_prob": None,
                     "edge_pct": None,
-                    "suggested_units": PREDICTION_UNITS,
+                    "suggested_units": pred_units,
                     "tip_type": "prediction",
                     "reasoning": " ".join(reasoning_parts),
                 })
@@ -599,7 +630,7 @@ def run(sport: str = "nba", log=print) -> dict:
                     linked_bet = {
                         "market": "spreads", "selection": selection,
                         "bookmaker": price_info["bookmaker"], "odds_decimal": decimal_odds,
-                        "suggested_units": PREDICTION_UNITS, "edge_pct": -1.0,
+                        "suggested_units": pred_units, "edge_pct": -1.0,
                     }
 
             for outcome_name, price_info in totals_best_prices.items():
@@ -617,6 +648,11 @@ def run(sport: str = "nba", log=print) -> dict:
                 decimal_odds = price_info["price"]
                 if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
                     continue
+                pred_risk = _scoring_lean_risk(gap, threshold)
+                pred_units = min(
+                    RISK_BASE_UNITS.get(pred_risk, RISK_BASE_UNITS["Neutral"]),
+                    LONGSHOT_UNIT_CAP if decimal_odds > settings["max_single_odds"] else settings["max_units"],
+                )
                 selection = _format_selection(outcome_name, point, "totals")
                 reasoning_parts = [
                     f"[Model prediction — no confirmed market edge] Points-scored/allowed "
@@ -639,7 +675,7 @@ def run(sport: str = "nba", log=print) -> dict:
                     "model_prob": None,
                     "market_fair_prob": None,
                     "edge_pct": None,
-                    "suggested_units": PREDICTION_UNITS,
+                    "suggested_units": pred_units,
                     "tip_type": "prediction",
                     "reasoning": " ".join(reasoning_parts),
                 })
@@ -648,7 +684,7 @@ def run(sport: str = "nba", log=print) -> dict:
                     linked_bet = {
                         "market": "totals", "selection": selection,
                         "bookmaker": price_info["bookmaker"], "odds_decimal": decimal_odds,
-                        "suggested_units": PREDICTION_UNITS, "edge_pct": -1.0,
+                        "suggested_units": pred_units, "edge_pct": -1.0,
                     }
 
         # Always log situational notes as their own Ball Knowledge entry, even

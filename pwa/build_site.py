@@ -66,14 +66,6 @@ def build_this_week() -> dict:
     week_end = (date.today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
     week_tips = _with_risk(db.get_tips_in_range(today, week_end, tip_type="value"))
 
-    moved = db.get_moved_lines(today, week_end)
-
-    def _movement_size(m):
-        first, latest = m["first"], m["latest"]
-        if first["point"] is not None and latest["point"] is not None:
-            return abs(latest["point"] - first["point"])
-        return abs(latest["fair_prob"] - first["fair_prob"])
-
     week_predictions = db.get_tips_in_range(today, week_end, tip_type="prediction")
     # Only Elo-based h2h predictions carry a model_prob -- the scoring-margin
     # spreads/totals leans (models/scoring.py) project a point margin/total
@@ -91,7 +83,6 @@ def build_this_week() -> dict:
         "model_leans": model_leans,
         "multis": [],
         "sgms": [],
-        "line_movement": sorted(moved, key=_movement_size, reverse=True)[:10],
         "everything_else": [],
     }
     if not week_tips:
