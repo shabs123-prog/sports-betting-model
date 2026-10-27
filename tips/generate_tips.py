@@ -6,6 +6,8 @@ dashboard. Markets (h2h/spreads/totals) and whether a sport has a results
 history (for Elo + ball-knowledge notes) are driven by config.SPORT_CONFIG --
 see that file to add a new sport.
 """
+from __future__ import annotations
+
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -83,13 +85,51 @@ KELLY_FRACTION = 0.25
 MIN_UNITS = 0.5
 
 
-def _kelly_units(fair_prob: float, decimal_odds: float, settings: dict) -> float:
+# Explicit feedback (2026-10-27, follow-up): 2.5u+ was showing up too
+# often. Checked live: it was almost entirely Predictions (h2h Elo leans
+# with no confirmed market edge) landing at exactly the same 3.0 ceiling
+# as real value tips -- backwards, since a Prediction is explicitly the
+# LOWER-confidence category (see PREDICTION_UNITS's old comment:
+# "shouldn't out-stake even a Lean value tip"). The scoring-margin leans
+# already had their own lower cap (SCORING_LEAN_MAX_UNITS); this gives
+# the Elo-based h2h leans the same discipline, via an optional override
+# on the shared Kelly sizing function rather than a second copy of it.
+PREDICTION_MAX_UNITS = 2.0
+
+# A second, separate problem the same feedback surfaced: raw linear
+# Kelly is so aggressive for a genuinely strong pick (checked live: 65%
+# win probability at 1.9 odds alone wants ~26% of bankroll under full
+# Kelly, 75% at 1.8 wants ~44%) that a hard cap just means most strong
+# picks land at the exact same ceiling number regardless of how much
+# stronger one is than another -- the opposite of "differentiate between
+# all of them." Below SOFT_CEILING_RATIO of the cap, sizing stays plain
+# linear Kelly (unchanged, that range was never the problem). Above it,
+# the excess is compressed into the remaining headroom with a saturating
+# curve (excess / (excess + K)) instead of a hard clip -- strictly
+# increasing (a better pick never sizes smaller than a worse one) but
+# approaches the cap instead of bunching everyone onto it, so 2.5-3.0
+# stays genuinely rare and reserved for the standout cases instead of
+# "anything reasonably confident."
+SOFT_CEILING_RATIO = 2 / 3
+SATURATION_K_MULTIPLIER = 2.5
+
+
+def _kelly_units(fair_prob: float, decimal_odds: float, settings: dict, max_units_override: float | None = None) -> float:
+    cap = settings["max_units"] if max_units_override is None else min(settings["max_units"], max_units_override)
     result = suggested_stake(
         fair_prob, decimal_odds,
         settings["bankroll_amount"], settings["unit_size_pct"],
-        KELLY_FRACTION, settings["max_units"],
+        KELLY_FRACTION, 999,  # uncapped here -- the saturating curve below does the capping
     )
-    units = result["units"]
+    raw = result["units"]
+    soft_ceiling = cap * SOFT_CEILING_RATIO
+    if raw <= soft_ceiling:
+        units = raw
+    else:
+        headroom = cap - soft_ceiling
+        excess = raw - soft_ceiling
+        k = headroom * SATURATION_K_MULTIPLIER
+        units = soft_ceiling + headroom * excess / (excess + k)
     if decimal_odds > settings["max_single_odds"]:
         units = min(units, LONGSHOT_UNIT_CAP)
     return round(max(MIN_UNITS, units), 2)
@@ -531,7 +571,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 implied_prob = 1.0 / decimal_odds
                 if model_prob < implied_prob:
                     continue  # model doesn't even think this price is fair, let alone a lean
-                pred_units = _kelly_units(model_prob, decimal_odds, settings)
+                pred_units = _kelly_units(model_prob, decimal_odds, settings, max_units_override=PREDICTION_MAX_UNITS)
                 reasoning_parts = [
                     f"[Model prediction — no confirmed market edge] Elo gives {outcome_name} a "
                     f"{model_prob:.1%} chance, above the {implied_prob:.1%} the price implies, "
