@@ -162,13 +162,25 @@ def _kelly_units(
 # are restricted to sports where a binary win/loss split is a reasonable
 # model of the market in the first place.
 PREDICTION_ELIGIBLE_SPORTS = {"nba", "nbl", "nfl", "afl"}
-PREDICTION_MIN_MODEL_PROB = 0.55
+# Both bars raised 2026-10-29 -- explicit feedback: "i dont want too many
+# bets unless they are likely to hit or have good value... we dont need
+# to do 12 bets a day... only do [it] if theres genuine reasoning."
+# Checked the actual board that prompted this (10 NBA scoring-margin
+# leans that night): every one of them cleared the OLD 1.5%-of-total gap
+# bar, several by a wide margin, so it wasn't that weak picks were
+# slipping through a broken threshold -- the bar itself was just set low
+# enough to pass most of a big (17-game) slate. Doubling it to 3% was
+# checked against that same real board: cuts the 4 weakest (which had
+# cleared the old bar by as little as 1.57x) while keeping the 5
+# genuinely strongest (2.19x-4.01x clear) -- a real quality cut, not an
+# arbitrary number.
+PREDICTION_MIN_MODEL_PROB = 0.60  # was 0.55 -- barely above a coin flip isn't "genuine reasoning"
 # How far the points-scored/allowed projection has to clear a spreads/totals
 # line (as a fraction of the projected total) before it's worth a lean --
 # same idea as a value tip's min-edge bar, just applied to a points gap
 # instead of a probability gap. Not sport-specific (NBA totals ~220,
 # NFL ~45) since it scales with the projection itself.
-PREDICTION_LEAN_MIN_GAP_PCT = 0.015
+PREDICTION_LEAN_MIN_GAP_PCT = 0.03  # was 0.015, see comment above
 
 
 # The scoring-margin model (spreads/totals leans) has no clean win
@@ -512,6 +524,15 @@ def run(sport: str = "nba", log=print) -> dict:
             model_prob_home = elo.win_probability(home_elo, away_elo)
             model_probs = {home_odds_name: model_prob_home, away_odds_name: 1 - model_prob_home}
             game_date_obj = date.fromisoformat(game_date)
+            # notes feeds Ball Knowledge cards only (knowledge_notes below) --
+            # explicit feedback (2026-10-29) that Value/Prediction card
+            # descriptions were "too complicated" led to dropping the full
+            # notes dump (every situational note plus every injury's full
+            # citation text) from their reasoning. _plain_why already surfaces
+            # the single most relevant fact in one plain sentence; the rest was
+            # redundant clutter on a card meant to be acted on, not read like
+            # a news digest. Don't re-add `reasoning_parts.extend(notes)` to
+            # those paths without re-raising this with the user first.
             notes = situational.generate_notes(home_team, away_team, game_date_obj, team_logs)
             home_injuries, away_injuries = [], []
             for team_name in (home_team, away_team):
@@ -628,8 +649,6 @@ def run(sport: str = "nba", log=print) -> dict:
                     ]
                     if model_prob is not None:
                         reasoning_parts.append(_elo_agreement_note(model_prob, fair_prob))
-                    if outcome_name in (home_odds_name, away_odds_name) and notes:
-                        reasoning_parts.extend(notes)
 
                     # Highest-edge value tip on this game becomes the bet shown
                     # alongside its Ball Knowledge note below -- so the card with
@@ -700,8 +719,6 @@ def run(sport: str = "nba", log=print) -> dict:
                     _plain_why(why_facts, _PREDICTION_H2H_WHY_FALLBACK),
                     _h2h_lean_reasoning(outcome_name, model_prob),
                 ]
-                if outcome_name in (home_odds_name, away_odds_name) and notes:
-                    reasoning_parts.extend(notes)
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
@@ -768,8 +785,6 @@ def run(sport: str = "nba", log=print) -> dict:
                         scoring_projection["home_projected"], scoring_projection["away_projected"],
                     ),
                 ]
-                if outcome_name in (home_odds_name, away_odds_name) and notes:
-                    reasoning_parts.extend(notes)
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
@@ -817,8 +832,6 @@ def run(sport: str = "nba", log=print) -> dict:
                     _plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK),
                     _totals_lean_reasoning(scoring_projection["projected_total"], point, wants_over),
                 ]
-                if notes:
-                    reasoning_parts.extend(notes)
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
