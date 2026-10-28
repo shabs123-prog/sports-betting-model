@@ -79,6 +79,29 @@ def project_matchup(home_avg: dict | None, away_avg: dict | None) -> dict | None
 # outright, not just sized down. Actual result: Kings lost by 27.
 PLAYER_ABSENCE_RETENTION = 0.35
 
+# Two safeguards added the same day, after checking a full real slate
+# (not just the one validated case): ESPN's free injuries feed is noisier
+# than expected at this granularity -- one team showed 7 "Out" players in
+# a single game including two genuine stars, which just isn't realistic
+# (that team wouldn't have a legal rotation left), and a separate case
+# had a player attributed to the wrong team entirely. Both are data-
+# quality problems in the free source itself, not something resolvable
+# from here (no independent roster source to cross-check against) -- so
+# instead of trusting an arbitrarily long/wrong list at face value, this
+# bounds how much damage it can do:
+#   - only the top MAX_OUT_PLAYERS_COUNTED by PPG count at all (a 5th+
+#     "Out" name is either a deep-bench player whose absence barely
+#     matters anyway, or more likely noise in the feed -- both reasons
+#     to ignore it)
+#   - the total adjustment is hard-capped at MAX_TEAM_POINTS_ADJUSTMENT
+#     regardless of how many qualify, as a backstop against any single
+#     wrong high-PPG entry (e.g. a misattributed star) swinging things
+#     implausibly
+# Re-checked both don't touch the one validated real case (2026-10-28
+# Kings: 4 players, uncapped) -- these only bite on the noisier cases.
+MAX_OUT_PLAYERS_COUNTED = 4
+MAX_TEAM_POINTS_ADJUSTMENT = 15.0
+
 
 def injury_adjusted_avg(team_avg: dict | None, out_player_ppgs: list[float]) -> dict | None:
     """
@@ -92,7 +115,8 @@ def injury_adjusted_avg(team_avg: dict | None, out_player_ppgs: list[float]) -> 
     """
     if not team_avg or not out_player_ppgs:
         return team_avg
-    lost_points = sum(out_player_ppgs) * PLAYER_ABSENCE_RETENTION
+    top_ppgs = sorted(out_player_ppgs, reverse=True)[:MAX_OUT_PLAYERS_COUNTED]
+    lost_points = min(sum(top_ppgs) * PLAYER_ABSENCE_RETENTION, MAX_TEAM_POINTS_ADJUSTMENT)
     adjusted = dict(team_avg)
     adjusted["scored"] = max(team_avg["scored"] - lost_points, 0.0)
     return adjusted
