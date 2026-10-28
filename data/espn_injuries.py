@@ -100,5 +100,9 @@ def get_team_injuries(espn_sport: str, espn_league: str, team_id: str) -> list[d
             "player": player,
             "status": status,
             "note": detail.get("shortComment", ""),
+            # Added 2026-10-29 for models/scoring.py's injury-adjusted
+            # projection -- the id was already being parsed out of
+            # athlete_ref above, just not returned before now.
+            "athlete_id": match.group(1) if match else None,
         })
     return results

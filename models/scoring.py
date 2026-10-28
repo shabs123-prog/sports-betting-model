@@ -62,3 +62,37 @@ def project_matchup(home_avg: dict | None, away_avg: dict | None) -> dict | None
         "projected_total": home_proj + away_proj,
         "projected_margin": home_proj - away_proj,  # positive = home favoured
     }
+
+
+# How much of a missing player's own scoring just doesn't happen (not
+# absorbed by a teammate taking the extra shots/minutes) -- real but
+# genuinely uncertain without play-by-play/on-off data this project
+# doesn't have access to; 0.35 is a conservative, clearly-approximate
+# estimate (teammates typically pick up the bulk, not all, of a missing
+# player's box-score production), not a precisely fitted number. Checked
+# against a real case (2026-10-28, Sacramento Kings missing 4 rotation
+# players incl. Ben Simmons, ~37 combined PPG) before picking it: at 0.35
+# the projected margin moved from the market's own direction by a
+# meaningful amount (-9.0 -> -15.4 points) and the gap that had made
+# "Kings +18.5" clear the lean threshold at all (9.5 pts of headroom)
+# shrank to -0.3 -- i.e. that exact bad pick would have been suppressed
+# outright, not just sized down. Actual result: Kings lost by 27.
+PLAYER_ABSENCE_RETENTION = 0.35
+
+
+def injury_adjusted_avg(team_avg: dict | None, out_player_ppgs: list[float]) -> dict | None:
+    """
+    Returns a copy of team_avg with "scored" reduced by the estimated
+    points its own confirmed-OUT players would otherwise have contributed.
+    Deliberately scoped to this team's OFFENSE only -- there's no
+    comparably simple, reliable free stat for how a specific player's
+    absence changes what the OPPOSING team scores (on/off defensive
+    rating isn't in this data source), so this doesn't invent one.
+    No-ops (returns team_avg unchanged) when there's nothing to adjust.
+    """
+    if not team_avg or not out_player_ppgs:
+        return team_avg
+    lost_points = sum(out_player_ppgs) * PLAYER_ABSENCE_RETENTION
+    adjusted = dict(team_avg)
+    adjusted["scored"] = max(team_avg["scored"] - lost_points, 0.0)
+    return adjusted

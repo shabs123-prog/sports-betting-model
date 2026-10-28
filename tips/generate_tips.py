@@ -26,13 +26,13 @@ from config import (
     TERTIARY_SHARP_REFERENCE_BOOKMAKER,
     USER_BOOKMAKERS,
 )
-from data import espn, espn_injuries, odds_api
+from data import espn, espn_injuries, espn_player_stats, odds_api
 from db import database as db
 from knowledge import situational
 from models import edge, elo
 from models.devig import devig_book
 from models.kelly import kelly_fraction
-from models.scoring import build_scoring_averages, project_matchup
+from models.scoring import build_scoring_averages, injury_adjusted_avg, project_matchup
 from models.team_names import build_nickname_index, resolve
 
 
@@ -271,6 +271,27 @@ def _format_selection(outcome_name: str, point, market_key: str) -> str:
     return f"{outcome_name} {point:+g}"
 
 
+# Added 2026-10-29: only "Out" counts here, not "Doubtful" -- a Doubtful
+# player has a real chance of suiting up, and this feeds an actual number
+# into the scoring projection (models.scoring.injury_adjusted_avg), unlike
+# the notes/why-facts text elsewhere which is purely descriptive. Caches
+# by athlete_id across the whole run (cache passed in, same pattern as
+# injury_cache in run()) so the same injured player across multiple games
+# in one pipeline run only costs one ESPN call.
+def _out_player_ppgs(injuries: list[dict], cfg: dict, cache: dict) -> list[float]:
+    ppgs = []
+    for inj in injuries:
+        if inj.get("status") != "Out" or not inj.get("athlete_id"):
+            continue
+        aid = inj["athlete_id"]
+        if aid not in cache:
+            cache[aid] = espn_player_stats.get_player_ppg(cfg["espn_sport"], cfg["espn_league"], aid)
+        ppg = cache[aid]
+        if ppg is not None:
+            ppgs.append(ppg)
+    return ppgs
+
+
 # Follow-up feedback, same day: a "summarised version... a sentence or 2
 # of why, with no numbers" to lead the card, ahead of the detailed
 # (numeric) sentence below -- takes the single most concrete situational
@@ -434,6 +455,7 @@ def run(sport: str = "nba", log=print) -> dict:
     ratings, team_logs, nickname_index, canonical_names, scoring_averages = {}, {}, {}, [], {}
     team_id_map: dict[str, str] = {}
     injury_cache: dict[str, list] = {}  # team_id -> injuries, reused across every event this run
+    player_ppg_cache: dict[str, float | None] = {}  # athlete_id -> season PPG, reused across every event this run
     if cfg["has_history"]:
         log(f"[{sport}] pulling finished games (ESPN) to train Elo ratings...")
         finished_games = _finished_games_for_elo(sport, cfg)
@@ -508,9 +530,16 @@ def run(sport: str = "nba", log=print) -> dict:
             why_facts = situational.plain_why_facts(
                 home_team, away_team, game_date_obj, team_logs, home_injuries, away_injuries
             )
-            scoring_projection = project_matchup(
-                scoring_averages.get(home_team), scoring_averages.get(away_team)
+
+            home_avg_adj = injury_adjusted_avg(
+                scoring_averages.get(home_team),
+                _out_player_ppgs(home_injuries, cfg, player_ppg_cache),
             )
+            away_avg_adj = injury_adjusted_avg(
+                scoring_averages.get(away_team),
+                _out_player_ppgs(away_injuries, cfg, player_ppg_cache),
+            )
+            scoring_projection = project_matchup(home_avg_adj, away_avg_adj)
 
         h2h_best_prices, h2h_value_outcomes = {}, set()
         spreads_best_prices, totals_best_prices = {}, {}
