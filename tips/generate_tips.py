@@ -182,6 +182,19 @@ PREDICTION_MIN_MODEL_PROB = 0.60  # was 0.55 -- barely above a coin flip isn't "
 # NFL ~45) since it scales with the projection itself.
 PREDICTION_LEAN_MIN_GAP_PCT = 0.03  # was 0.015, see comment above
 
+# Real bug found 2026-10-29 ("why is everything 0.75 units"): the units
+# formula reuses PREDICTION_LEAN_MIN_GAP_PCT as both the qualification
+# bar AND the sizing scale (ratio = gap / threshold, fed into
+# _scoring_lean_units). Doubling the bar above to cut volume silently
+# also halved every surviving pick's ratio -- checked live, a genuine
+# 10-point gap that would've sized at 2.0u under the old 1.5% threshold
+# sized at 0.75u under the new 3% one, same actual edge, just a smaller
+# number because the denominator changed. Raising the bar should only
+# cut WHICH picks show, not recompute how confident the survivors look.
+# This constant decouples the two: qualification still uses the higher
+# PREDICTION_LEAN_MIN_GAP_PCT, sizing always scales against this
+# original, lower reference regardless of where the bar sits.
+SCORING_LEAN_SIZING_REF_PCT = 0.015
 
 # The scoring-margin model (spreads/totals leans) has no clean win
 # probability to feed into Kelly -- just a points gap over the min-gap
@@ -304,29 +317,22 @@ def _out_player_ppgs(injuries: list[dict], cfg: dict, cache: dict) -> list[float
     return ppgs
 
 
-# Follow-up feedback, same day: a "summarised version... a sentence or 2
-# of why, with no numbers" to lead the card, ahead of the detailed
-# (numeric) sentence below -- takes the single most concrete situational
-# fact for this game (situational.plain_why_facts, already number-free by
-# construction) when one exists, otherwise a generic-but-true, tip-type-
-# specific reason. Deliberately doesn't fabricate a specific-sounding
-# reason when there isn't one -- most tips have no standout situational
-# angle, and a made-up-sounding one would be worse than an honest generic
-# line.
-def _plain_why(why_facts: list[str], fallback: str) -> str:
+# Went through three lengths the same week before landing here: multi-
+# paragraph with full injury citations (too long) -> one plain sentence
+# only (too short, follow-up feedback: "it can legit be 3-4 sentences...
+# just make sure its concise") -> this: up to 2 plain-English facts
+# (situational.plain_why_facts, number-free by construction) plus one
+# short quantitative detail sentence plus, for Predictions only, a short
+# disclaimer -- 2-4 tight sentences depending on tip type, none of them
+# a multi-clause run-on. Doesn't fabricate a second fact when there's
+# only one real one to report.
+def _plain_why(why_facts: list[str], fallback: str, max_facts: int = 2) -> str:
     if why_facts:
-        fact = why_facts[0]
-        return f"{fact[0].upper()}{fact[1:]}."
+        sentences = [f"{f[0].upper()}{f[1:]}." for f in why_facts[:max_facts]]
+        return " ".join(sentences)
     return fallback
 
 
-# Follow-up feedback (2026-10-29): "still too long... needs to be a
-# summarized concise one" -- the 2-3 sentence version (this plain-English
-# lead plus a separate detailed/numeric sentence) was still too much.
-# Cut down to JUST this one sentence now; the quantitative side (edge %,
-# model confidence %) is already shown in the badge right above the
-# description (pwa/build_site.py's combinedRating / "Model confidence"),
-# so restating it in the text was redundant as well as long.
 _VALUE_WHY_FALLBACK = (
     "The price here just doesn't match how these two sides actually stack up -- "
     "gaps like that don't usually last long once enough money notices."
@@ -339,6 +345,75 @@ _PREDICTION_SCORING_WHY_FALLBACK = (
     "Our scoring model sees this game playing out a little differently than the number "
     "on the board suggests."
 )
+
+# Quantitative follow-up sentence, one per tip type -- the plain-English
+# why above explains it in words, this gives the actual number for
+# whoever wants it, same spirit as before the 2026-10-29 "too long" cut,
+# just kept to one tight sentence each rather than a longer paragraph.
+def _value_detail(fair_prob: float, decimal_odds: float, bookmaker: str) -> str:
+    implied_prob = 1.0 / decimal_odds
+    return (
+        f"About a {fair_prob:.0%} chance this comes in, but {bookmaker} only needs "
+        f"{implied_prob:.0%} for it to pay off -- that gap's the edge."
+    )
+
+
+def _h2h_lean_detail(outcome_name: str, model_prob: float) -> str:
+    return f"Our model gives {outcome_name} about {model_prob:.0%} to win, a touch better than the price suggests."
+
+
+def _spreads_lean_detail(selection: str, home_projected: float, away_projected: float) -> str:
+    return (
+        f"Our scoring model expects this one to land around {home_projected:.0f}-{away_projected:.0f} "
+        f"-- enough to cover {selection}."
+    )
+
+
+def _totals_lean_detail(projected_total: float, point: float, wants_over: bool) -> str:
+    direction = "clearing" if wants_over else "staying under"
+    return f"Our scoring model expects around {projected_total:.0f} total points -- {direction} the {point:g} line here."
+
+
+# Short on purpose -- the old version of this one sentence was itself a
+# big chunk of why descriptions felt long. A Prediction already reads
+# differently from a Value tip (its own badge says "Model confidence"
+# instead of a tier/edge%), so this just needs to say "not confirmed",
+# not re-explain the whole concept every time.
+_PREDICTION_DISCLAIMER = "Model lean, not a confirmed market edge."
+
+# Explicit feedback (2026-10-29): "i want the bets to show lines that are
+# predicted to change... post those bets too if theres a chance it
+# changes... only do if theres value tho." Deliberately NOT a new, separate
+# trigger -- that would mean recommending a bet purely because a number
+# moved, with no model behind it. Instead this only enriches a
+# spreads/totals Prediction that ALREADY cleared the real gap bar: using
+# models/line_history (already recorded every refresh, previously only
+# used for a since-removed "Line Movement" UI section), check whether the
+# market's own number has been drifting the same direction our model
+# already leans -- i.e. today's gap against our projection is bigger than
+# it was a few days ago at the earliest recorded point. Sign-agnostic by
+# design: recompute_gap takes an arbitrary point and reuses the caller's
+# own gap formula (spreads and totals have different sign conventions,
+# this sidesteps needing to get both right by hand). MIN_MOVE guards
+# against noise from a half-point line-shopping wobble that isn't a real
+# trend.
+_LINE_MOMENTUM_MIN_MOVE = 1.0
+
+
+def _line_momentum_fact(
+    sport: str, matchup: str, game_date: str, market: str, outcome: str,
+    current_point: float, current_gap: float, recompute_gap,
+) -> str | None:
+    history = db.get_line_history(sport, matchup, game_date, market, outcome)
+    if len(history) < 2:
+        return None
+    first_point = history[0]["point"]
+    if first_point is None or abs(current_point - first_point) < _LINE_MOMENTUM_MIN_MOVE:
+        return None
+    historical_gap = recompute_gap(first_point)
+    if current_gap <= historical_gap:
+        return None
+    return f"This line's been drifting our way -- {first_point:g} a few days ago, {current_point:g} now."
 
 
 def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> tuple[int, list[dict]]:
@@ -397,7 +472,7 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
                 if devig_edge_pct < _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     continue
                 units = _kelly_units(fair_prob, decimal_odds, settings)
-                reasoning = _VALUE_WHY_FALLBACK
+                reasoning = f"{_VALUE_WHY_FALLBACK} {_value_detail(fair_prob, decimal_odds, bookmaker)}"
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
@@ -602,7 +677,10 @@ def run(sport: str = "nba", log=print) -> dict:
                 # or sizes a stake -- that was a bug in an earlier version.
                 if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     units = _kelly_units(fair_prob, decimal_odds, settings)
-                    reasoning_parts = [_plain_why(why_facts, _VALUE_WHY_FALLBACK)]
+                    reasoning_parts = [
+                        _plain_why(why_facts, _VALUE_WHY_FALLBACK),
+                        _value_detail(fair_prob, decimal_odds, bookmaker),
+                    ]
 
                     # Highest-edge value tip on this game becomes the bet shown
                     # alongside its Ball Knowledge note below -- so the card with
@@ -669,7 +747,11 @@ def run(sport: str = "nba", log=print) -> dict:
                     max_units_override=PREDICTION_MAX_UNITS,
                     curve_k_override=PREDICTION_CURVE_K,
                 )
-                reasoning_parts = [_plain_why(why_facts, _PREDICTION_H2H_WHY_FALLBACK)]
+                reasoning_parts = [
+                    _plain_why(why_facts, _PREDICTION_H2H_WHY_FALLBACK),
+                    _h2h_lean_detail(outcome_name, model_prob),
+                    _PREDICTION_DISCLAIMER,
+                ]
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
@@ -725,11 +807,25 @@ def run(sport: str = "nba", log=print) -> dict:
                 decimal_odds = price_info["price"]
                 if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
                     continue
-                pred_units = _scoring_lean_units(gap, threshold)
+                sizing_threshold = scoring_projection["projected_total"] * SCORING_LEAN_SIZING_REF_PCT
+                pred_units = _scoring_lean_units(gap, sizing_threshold)
                 if decimal_odds > settings["max_single_odds"]:
                     pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "spreads")
-                reasoning_parts = [_plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK)]
+                momentum_fact = _line_momentum_fact(
+                    sport, matchup, game_date, "spreads", outcome_name,
+                    point, gap, lambda p: team_margin + p,
+                )
+                reasoning_parts = [
+                    _plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK),
+                    _spreads_lean_detail(
+                        selection,
+                        scoring_projection["home_projected"], scoring_projection["away_projected"],
+                    ),
+                ]
+                if momentum_fact:
+                    reasoning_parts.append(momentum_fact)
+                reasoning_parts.append(_PREDICTION_DISCLAIMER)
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
@@ -769,11 +865,24 @@ def run(sport: str = "nba", log=print) -> dict:
                 decimal_odds = price_info["price"]
                 if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
                     continue
-                pred_units = _scoring_lean_units(gap, threshold)
+                sizing_threshold = scoring_projection["projected_total"] * SCORING_LEAN_SIZING_REF_PCT
+                pred_units = _scoring_lean_units(gap, sizing_threshold)
                 if decimal_odds > settings["max_single_odds"]:
                     pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "totals")
-                reasoning_parts = [_plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK)]
+                projected_total = scoring_projection["projected_total"]
+                momentum_fact = _line_momentum_fact(
+                    sport, matchup, game_date, "totals", outcome_name,
+                    point, gap,
+                    lambda p: (projected_total - p) if wants_over else (p - projected_total),
+                )
+                reasoning_parts = [
+                    _plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK),
+                    _totals_lean_detail(scoring_projection["projected_total"], point, wants_over),
+                ]
+                if momentum_fact:
+                    reasoning_parts.append(momentum_fact)
+                reasoning_parts.append(_PREDICTION_DISCLAIMER)
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,

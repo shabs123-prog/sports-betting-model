@@ -140,6 +140,30 @@ select.form-input {
   text-align: right;
 }
 
+.unit-size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 16px;
+  flex-wrap: wrap;
+}
+.unit-size-row label {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+.unit-size-row input {
+  width: 64px;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.unit-size-row .caption {
+  margin: 0;
+}
+
 .card .meta-row {
   display: flex;
   justify-content: space-between;

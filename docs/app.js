@@ -340,6 +340,35 @@ function saveBets(bets) {
   }
 }
 
+// Explicit feedback (2026-10-29): "i wanna be able to change the unit
+// size in the my bets section as well" -- separate from a bet's own
+// units count (how many units staked on THAT bet, already editable).
+// This is "how many dollars is one unit", purely a local display
+// preference for turning the units figures already shown into a $
+// figure for your own bankroll -- doesn't touch the server-side sizing
+// (config.py's BANKROLL_AMOUNT/UNIT_SIZE_PCT), which is what actually
+// drives suggested_units. No default guess at a dollar value -- shows
+// nothing $-denominated until you set one.
+const UNIT_SIZE_KEY = "vb_unit_size_v1";
+
+function getUnitSize() {
+  try {
+    const v = parseFloat(localStorage.getItem(UNIT_SIZE_KEY));
+    return v > 0 ? v : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function setUnitSize(value) {
+  try {
+    if (value > 0) localStorage.setItem(UNIT_SIZE_KEY, String(value));
+    else localStorage.removeItem(UNIT_SIZE_KEY);
+  } catch (e) {
+    // Storage unavailable -- the $ display just won't persist this session.
+  }
+}
+
 function tipKey(t) {
   return [t.sport, t.matchup, t.market, t.selection, t.bookmaker].join("|");
 }
@@ -606,6 +635,13 @@ function renderMyBets() {
   const bets = loadBets();
   let html = `<p class="caption">Lives only on this device — tap "+ Log bet" on any tip to add it here, nothing synced anywhere. Settles itself once a game finishes (marked "auto") using free public results — if a bet doesn't auto-settle (e.g. it's not matched yet), use Win/Loss/Push yourself.</p>`;
 
+  const unitSize = getUnitSize();
+  html += `<div class="unit-size-row">
+    <label for="unit-size-input">$ per unit</label>
+    <input type="number" id="unit-size-input" step="1" min="0" placeholder="e.g. 10" value="${unitSize || ""}">
+    <span class="caption">optional, just for the $ figures below -- doesn't change sizing</span>
+  </div>`;
+
   if (!bets.length) {
     html += `<div class="muted-note">No bets logged yet.</div>`;
     return html;
@@ -618,11 +654,14 @@ function renderMyBets() {
   const roiPct = totalStaked ? (netUnits / totalStaked) * 100 : 0;
   const wins = settled.filter((b) => b.result === "win").length;
   const winRate = settled.length ? ((wins / settled.length) * 100).toFixed(1) : "0.0";
+  const netDollarsLabel = unitSize
+    ? ` (${netUnits >= 0 ? "+" : "-"}$${Math.abs(netUnits * unitSize).toFixed(2)})`
+    : "";
 
   html += `<div class="bets-summary">
     <div><span class="v">${settled.length}</span><span class="l">Settled</span></div>
     <div><span class="v">${winRate}%</span><span class="l">Win rate</span></div>
-    <div><span class="v">${netUnits >= 0 ? "+" : ""}${netUnits.toFixed(2)}u</span><span class="l">Net units</span></div>
+    <div><span class="v">${netUnits >= 0 ? "+" : ""}${netUnits.toFixed(2)}u${netDollarsLabel}</span><span class="l">Net units</span></div>
   </div>`;
   if (totalStaked > 0) {
     html += `<div class="bets-summary">
@@ -890,6 +929,11 @@ function init() {
     const unitsInput = e.target.closest("[data-bet-units]");
     if (unitsInput) {
       updateBetUnits(unitsInput.dataset.betUnits, parseFloat(unitsInput.value));
+      renderTab(activeTab);
+      return;
+    }
+    if (e.target.id === "unit-size-input") {
+      setUnitSize(parseFloat(e.target.value));
       renderTab(activeTab);
     }
   });
