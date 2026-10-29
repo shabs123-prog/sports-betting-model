@@ -369,6 +369,45 @@ details.expander > summary::before { content: "▸ "; }
 details.expander[open] > summary::before { content: "▾ "; }
 details.expander .expander-body { padding: 4px 14px 12px; }
 
+/* Richer than the plain expander above -- used only for My Bets' Results
+   groups, one per day a game was played, so the header itself carries a
+   real win-loss record and a colour-coded net rather than just text. */
+details.results-date-group {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+details.results-date-group > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+details.results-date-group > summary::-webkit-details-marker { display: none; }
+details.results-date-group > summary::before { content: "▸  "; color: var(--text-dim); }
+details.results-date-group[open] > summary::before { content: "▾  "; color: var(--text-dim); }
+details.results-date-group[open] > summary { border-bottom: 1px solid var(--panel-border); }
+.results-date-label {
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+.results-date-stats {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.results-date-stats .net { font-weight: 700; }
+.results-date-stats .net.win { color: var(--green); }
+.results-date-stats .net.loss { color: var(--red); }
+.results-date-stats .net.push { color: var(--text-dim); }
+details.results-date-group .expander-body { padding: 10px 14px 12px; }
+details.results-date-group .expander-body .card:last-child { margin-bottom: 0; }
+
 .combo-leg { font-size: 0.85rem; margin: 2px 0; color: var(--text-dim); }
 .combo-metrics {
   display: flex;

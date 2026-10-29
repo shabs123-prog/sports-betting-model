@@ -580,7 +580,34 @@ function autoGradeBets() {
     else if (outcome === "loss") bet.profit_units = -bet.units;
     else bet.profit_units = 0;
     bet.auto_graded = true;
+    if (!bet.game_date) bet.game_date = match.date; // matched fixture's own date, now we know it
     changed = true;
+  }
+  if (changed) saveBets(bets);
+}
+
+// Explicit feedback (2026-10-30): "the dates of the resulted bets usnt
+// there so i cant click the date... if/when the game takes place so
+// that date is where the bet shld go for results" -- bets logged before
+// game_date was captured at all (a handful of real ones, from before
+// that fix) have nothing to group Results by. One-time cleanup, not an
+// ongoing need (every new bet already gets game_date at log time): for
+// any already-settled bet still missing one, look for a free-results
+// match -- only backfills when there's EXACTLY one candidate (same
+// caution as autoGradeBets' own matching: don't guess a date from an
+// ambiguous same-matchup collision).
+function backfillMissingDates() {
+  const resultsBySport = (state.data && state.data.results) || {};
+  const bets = loadBets();
+  let changed = false;
+  for (const bet of bets) {
+    if (bet.game_date) continue;
+    const sportResults = resultsBySport[bet.sport] || [];
+    const matches = sportResults.filter((r) => r.matchup === bet.matchup);
+    if (matches.length === 1) {
+      bet.game_date = matches[0].date;
+      changed = true;
+    }
   }
   if (changed) saveBets(bets);
 }
@@ -631,6 +658,7 @@ function betCard(b) {
     <div class="card">
       <button class="delete-bet" data-delete-bet="${b.id}" aria-label="Delete">×</button>
       <div class="matchup">${escapeHtml(b.sport.toUpperCase())}: ${escapeHtml(b.matchup)}</div>
+      ${b.game_date ? `<div class="date">${escapeHtml(fmtWhen(b))}</div>` : ""}
       <div class="pick-line"><b>${escapeHtml(marketLabel(b.market))}</b> · ${escapeHtml(b.selection)} @ <b>${fmtOdds(b.odds_decimal)}</b> · ${escapeHtml(b.bookmaker)} · <input type="number" class="bet-units-input" data-bet-units="${b.id}" value="${b.units}" step="0.25" min="0.25">u</div>
       ${b.notes ? `<div class="reasoning">"${escapeHtml(b.notes)}"</div>` : ""}
       ${actions}
@@ -672,13 +700,35 @@ function renderTierBreakdown(settled) {
   </details>`;
 }
 
+// One collapsible, card-styled group per day a game was actually played
+// (own component rather than the plain expander() helper used for combos/
+// tier-breakdown, so the header can show a real win-loss record and a
+// colour-coded net instead of just a line of text).
+function resultsDateGroup(dateKey, dayBets) {
+  const dayNet = dayBets.reduce((s, b) => s + (b.profit_units || 0), 0);
+  const wins = dayBets.filter((b) => b.result === "win").length;
+  const losses = dayBets.filter((b) => b.result === "loss").length;
+  const pushes = dayBets.filter((b) => b.result === "push").length;
+  const record = `${wins}-${losses}${pushes ? `-${pushes}` : ""}`;
+  const label = dateKey ? fmtResultsDateLabel(dateKey) : "Undated";
+  const netClass = dayNet > 0 ? "win" : dayNet < 0 ? "loss" : "push";
+  return `
+    <details class="results-date-group">
+      <summary>
+        <span class="results-date-label">${escapeHtml(label)}</span>
+        <span class="results-date-stats">${record} <span class="net ${netClass}">${dayNet >= 0 ? "+" : ""}${dayNet.toFixed(2)}u</span></span>
+      </summary>
+      <div class="expander-body">${dayBets.map(betCard).join("")}</div>
+    </details>`;
+}
+
 // Groups settled bets by game_date into collapsible sections (newest
 // first) so a long results history doesn't bombard the page -- explicit
 // feedback (2026-10-30): "have a drop box for each date... 27 october
 // results, 28 october results". Bets with no game_date (manually logged
 // before a date was picked, or very old bets from before game_date
-// existed at all) land in one "Undated" group at the end rather than
-// being dropped.
+// existed at all, that backfillMissingDates() couldn't resolve) land in
+// one "Undated" group at the end rather than being dropped.
 function renderResultsByDate(settled) {
   const groups = {};
   for (const b of settled) {
@@ -686,15 +736,9 @@ function renderResultsByDate(settled) {
     (groups[key] = groups[key] || []).push(b);
   }
   const dated = Object.keys(groups).filter((k) => k).sort().reverse();
-  let html = "";
-  for (const key of dated) {
-    const dayBets = groups[key];
-    const dayNet = dayBets.reduce((s, b) => s + (b.profit_units || 0), 0);
-    const label = `${fmtResultsDateLabel(key)} (${dayBets.length} bet${dayBets.length === 1 ? "" : "s"} · ${dayNet >= 0 ? "+" : ""}${dayNet.toFixed(2)}u)`;
-    html += expander(label, dayBets.map(betCard).join(""));
-  }
+  let html = dated.map((key) => resultsDateGroup(key, groups[key])).join("");
   if (groups[""]) {
-    html += expander(`Undated (${groups[""].length})`, groups[""].map(betCard).join(""));
+    html += resultsDateGroup(null, groups[""]);
   }
   return html;
 }
@@ -731,6 +775,7 @@ function manualLogForm() {
 
 function renderMyBets() {
   autoGradeBets();
+  backfillMissingDates();
   const bets = loadBets();
   let html = `<p class="caption">Lives only on this device — tap "+ Log bet" on any tip to add it here, nothing synced anywhere. Settles itself once a game finishes (marked "auto") using free public results — if a bet doesn't auto-settle (e.g. it's not matched yet), use Win/Loss/Push yourself.</p>`;
 
