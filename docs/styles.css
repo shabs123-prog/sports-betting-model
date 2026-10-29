@@ -128,6 +128,18 @@ select.form-input {
 }
 .card .pick-line b { color: var(--accent); }
 
+.bet-units-input {
+  width: 48px;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 2px 4px;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 600;
+  text-align: right;
+}
+
 .card .meta-row {
   display: flex;
   justify-content: space-between;

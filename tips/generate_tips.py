@@ -320,6 +320,13 @@ def _plain_why(why_facts: list[str], fallback: str) -> str:
     return fallback
 
 
+# Follow-up feedback (2026-10-29): "still too long... needs to be a
+# summarized concise one" -- the 2-3 sentence version (this plain-English
+# lead plus a separate detailed/numeric sentence) was still too much.
+# Cut down to JUST this one sentence now; the quantitative side (edge %,
+# model confidence %) is already shown in the badge right above the
+# description (pwa/build_site.py's combinedRating / "Model confidence"),
+# so restating it in the text was redundant as well as long.
 _VALUE_WHY_FALLBACK = (
     "The price here just doesn't match how these two sides actually stack up -- "
     "gaps like that don't usually last long once enough money notices."
@@ -332,54 +339,6 @@ _PREDICTION_SCORING_WHY_FALLBACK = (
     "Our scoring model sees this game playing out a little differently than the number "
     "on the board suggests."
 )
-
-
-# Explicit feedback (2026-10-27): the card description was too technical/
-# jargon-heavy for a casual reader -- "no-vig fair probability", "price-
-# implied", bookmaker-benchmark names. The tier/risk badge already shown
-# right above this text (pwa/build_site.py + docs/app.js's combinedRating)
-# covers "how good/risky is this" -- these strings only need to cover
-# "why", in plain language, without repeating that badge.
-def _value_reasoning(fair_prob: float, decimal_odds: float, bookmaker: str) -> str:
-    implied_prob = 1.0 / decimal_odds
-    return (
-        f"About a {fair_prob:.0%} chance this comes in, but {bookmaker} only needs "
-        f"{implied_prob:.0%} for it to pay off -- that gap's the edge."
-    )
-
-
-def _elo_agreement_note(model_prob: float, fair_prob: float) -> str:
-    if abs(model_prob - fair_prob) >= 0.08:
-        return (
-            f"Our prediction model sees this one differently ({model_prob:.0%}) -- "
-            f"that's just model noise here, the market price above is the real signal."
-        )
-    return f"Our prediction model agrees ({model_prob:.0%})."
-
-
-_MODEL_LEAN_DISCLAIMER = (
-    "No confirmed market edge here -- just our prediction model's own read, "
-    "treat it as a lean rather than a sure thing, especially early in a season."
-)
-
-
-def _h2h_lean_reasoning(outcome_name: str, model_prob: float) -> str:
-    return f"Our model gives {outcome_name} about {model_prob:.0%} to win, a touch better than the price suggests. {_MODEL_LEAN_DISCLAIMER}"
-
-
-def _spreads_lean_reasoning(selection: str, home_projected: float, away_projected: float) -> str:
-    return (
-        f"Our scoring model expects this one to land around {home_projected:.0f}-{away_projected:.0f} -- "
-        f"enough to cover {selection}. {_MODEL_LEAN_DISCLAIMER}"
-    )
-
-
-def _totals_lean_reasoning(projected_total: float, point: float, wants_over: bool) -> str:
-    direction = "clearing" if wants_over else "staying under"
-    return (
-        f"Our scoring model expects around {projected_total:.0f} total points -- {direction} "
-        f"the {point:g} line here. {_MODEL_LEAN_DISCLAIMER}"
-    )
 
 
 def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> tuple[int, list[dict]]:
@@ -438,7 +397,7 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
                 if devig_edge_pct < _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     continue
                 units = _kelly_units(fair_prob, decimal_odds, settings)
-                reasoning = f"{_plain_why([], _VALUE_WHY_FALLBACK)} {_value_reasoning(fair_prob, decimal_odds, bookmaker)}"
+                reasoning = _VALUE_WHY_FALLBACK
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
@@ -643,12 +602,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 # or sizes a stake -- that was a bug in an earlier version.
                 if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
                     units = _kelly_units(fair_prob, decimal_odds, settings)
-                    reasoning_parts = [
-                        _plain_why(why_facts, _VALUE_WHY_FALLBACK),
-                        _value_reasoning(fair_prob, decimal_odds, bookmaker),
-                    ]
-                    if model_prob is not None:
-                        reasoning_parts.append(_elo_agreement_note(model_prob, fair_prob))
+                    reasoning_parts = [_plain_why(why_facts, _VALUE_WHY_FALLBACK)]
 
                     # Highest-edge value tip on this game becomes the bet shown
                     # alongside its Ball Knowledge note below -- so the card with
@@ -715,10 +669,7 @@ def run(sport: str = "nba", log=print) -> dict:
                     max_units_override=PREDICTION_MAX_UNITS,
                     curve_k_override=PREDICTION_CURVE_K,
                 )
-                reasoning_parts = [
-                    _plain_why(why_facts, _PREDICTION_H2H_WHY_FALLBACK),
-                    _h2h_lean_reasoning(outcome_name, model_prob),
-                ]
+                reasoning_parts = [_plain_why(why_facts, _PREDICTION_H2H_WHY_FALLBACK)]
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
@@ -778,13 +729,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 if decimal_odds > settings["max_single_odds"]:
                     pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "spreads")
-                reasoning_parts = [
-                    _plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK),
-                    _spreads_lean_reasoning(
-                        selection,
-                        scoring_projection["home_projected"], scoring_projection["away_projected"],
-                    ),
-                ]
+                reasoning_parts = [_plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK)]
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,
@@ -828,10 +773,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 if decimal_odds > settings["max_single_odds"]:
                     pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "totals")
-                reasoning_parts = [
-                    _plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK),
-                    _totals_lean_reasoning(scoring_projection["projected_total"], point, wants_over),
-                ]
+                reasoning_parts = [_plain_why(why_facts, _PREDICTION_SCORING_WHY_FALLBACK)]
                 db.insert_tip({
                     "game_date": game_date,
                     "game_time_local": game_time_local,

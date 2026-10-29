@@ -373,6 +373,16 @@ function logBetFromTip(t, overrides) {
     odds_decimal: o.odds_decimal || t.odds_decimal,
     units: o.units || t.suggested_units || 1,
     notes: o.notes || "",
+    // Captured at log time so autoGradeBets can require the matched result
+    // to actually be the same fixture, not just the same matchup string --
+    // a real bug (2026-10-29): without this, a bet on an upcoming game got
+    // auto-graded as a win against an unrelated same-matchup result
+    // elsewhere in the free ESPN results window, since matching had nothing
+    // but the team names to go on. Bets logged before this field existed
+    // just have no game_date -- autoGradeBets falls back to the old
+    // (imperfect) matchup-only match for those rather than refusing to
+    // grade them at all.
+    game_date: t.game_date,
     result: "pending",
     // Captured at log time (not recomputed later) so the By Tier
     // breakdown reflects what the tip actually looked like when you bet
@@ -393,6 +403,17 @@ function settleBet(id, result, autoGraded) {
   else if (result === "loss") bet.profit_units = -bet.units;
   else bet.profit_units = 0;
   bet.auto_graded = !!autoGraded;
+  saveBets(bets);
+}
+
+function updateBetUnits(id, newUnits) {
+  if (!(newUnits > 0)) return;
+  const bets = loadBets();
+  const bet = bets.find((b) => b.id === id);
+  if (!bet) return;
+  bet.units = newUnits;
+  if (bet.result === "win") bet.profit_units = bet.units * (bet.odds_decimal - 1);
+  else if (bet.result === "loss") bet.profit_units = -bet.units;
   saveBets(bets);
 }
 
@@ -473,7 +494,13 @@ function autoGradeBets() {
   for (const bet of bets) {
     if (bet.result !== "pending") continue;
     const sportResults = resultsBySport[bet.sport] || [];
-    const match = sportResults.find((r) => r.matchup === bet.matchup);
+    // Require the same date when the bet has one (see logBetFromTip) --
+    // matchup string alone isn't unique enough (same two teams can meet
+    // more than once within the results lookback window). Bets from
+    // before game_date was captured fall back to matchup-only matching.
+    const match = sportResults.find(
+      (r) => r.matchup === bet.matchup && (!bet.game_date || r.date === bet.game_date)
+    );
     if (!match) continue;
     const outcome = gradeBet(bet, match);
     if (!outcome) continue;
@@ -533,7 +560,7 @@ function betCard(b) {
     <div class="card">
       <button class="delete-bet" data-delete-bet="${b.id}" aria-label="Delete">×</button>
       <div class="matchup">${escapeHtml(b.sport.toUpperCase())}: ${escapeHtml(b.matchup)}</div>
-      <div class="pick-line"><b>${escapeHtml(marketLabel(b.market))}</b> · ${escapeHtml(b.selection)} @ <b>${fmtOdds(b.odds_decimal)}</b> · ${escapeHtml(b.bookmaker)} · ${fmtUnits(b.units)}u</div>
+      <div class="pick-line"><b>${escapeHtml(marketLabel(b.market))}</b> · ${escapeHtml(b.selection)} @ <b>${fmtOdds(b.odds_decimal)}</b> · ${escapeHtml(b.bookmaker)} · <input type="number" class="bet-units-input" data-bet-units="${b.id}" value="${b.units}" step="0.25" min="0.25">u</div>
       ${b.notes ? `<div class="reasoning">"${escapeHtml(b.notes)}"</div>` : ""}
       ${actions}
     </div>`;
@@ -853,6 +880,17 @@ function init() {
       const sport = refreshSportBtn.dataset.refreshSport;
       const statusEl = document.querySelector(`[data-refresh-status="${sport}"]`);
       triggerRefresh(sport, refreshSportBtn, statusEl);
+    }
+  });
+
+  // Separate delegated listener for the inline units editor in My Bets --
+  // "change" (not "click") fires once the field loses focus or Enter is
+  // pressed, so it doesn't update on every keystroke.
+  document.getElementById("content").addEventListener("change", (e) => {
+    const unitsInput = e.target.closest("[data-bet-units]");
+    if (unitsInput) {
+      updateBetUnits(unitsInput.dataset.betUnits, parseFloat(unitsInput.value));
+      renderTab(activeTab);
     }
   });
 
