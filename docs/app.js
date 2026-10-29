@@ -20,6 +20,7 @@ const REFRESH_PROXY_SECRET = "";
 let state = { data: null };
 let editingTipKey = null; // which card (by tipKey) currently has its log-bet form open
 let manualLogFormOpen = false; // the standalone "+ Log a bet manually" form in My Bets
+let editingBetId = null; // which logged bet's full-edit form is open (any field, not just units)
 
 function escapeHtml(s) {
   if (s === null || s === undefined) return "";
@@ -488,6 +489,21 @@ function updateBetUnits(id, newUnits) {
   saveBets(bets);
 }
 
+// Full edit, not just units -- "in case i make a mistake putting it in".
+// Recomputes profit_units if the bet is already settled, same formula as
+// settleBet/updateBetUnits, since odds or units might be exactly the
+// mistake being fixed.
+function updateBetFields(id, fields) {
+  const bets = loadBets();
+  const bet = bets.find((b) => b.id === id);
+  if (!bet) return;
+  Object.assign(bet, fields);
+  if (bet.result === "win") bet.profit_units = bet.units * (bet.odds_decimal - 1);
+  else if (bet.result === "loss") bet.profit_units = -bet.units;
+  else if (bet.result === "push") bet.profit_units = 0;
+  saveBets(bets);
+}
+
 function revertBetToPending(id) {
   const bets = loadBets();
   const bet = bets.find((b) => b.id === id);
@@ -642,6 +658,9 @@ function logBetButton(t) {
 }
 
 function betCard(b) {
+  if (editingBetId === b.id) {
+    return `<div class="card">${editBetForm(b)}</div>`;
+  }
   const actions = b.result === "pending"
     ? `<div class="bet-actions">
         <button class="bet-btn win" data-settle="${b.id}" data-result="win">Win</button>
@@ -657,6 +676,7 @@ function betCard(b) {
   return `
     <div class="card">
       <button class="delete-bet" data-delete-bet="${b.id}" aria-label="Delete">×</button>
+      <button class="edit-bet-btn" data-open-edit-bet="${b.id}" aria-label="Edit">✎</button>
       <div class="matchup">${escapeHtml(b.sport.toUpperCase())}: ${escapeHtml(b.matchup)}</div>
       ${b.game_date ? `<div class="date">${escapeHtml(fmtWhen(b))}</div>` : ""}
       <div class="pick-line"><b>${escapeHtml(marketLabel(b.market))}</b> · ${escapeHtml(b.selection)} @ <b>${fmtOdds(b.odds_decimal)}</b> · ${escapeHtml(b.bookmaker)} · <input type="number" class="bet-units-input" data-bet-units="${b.id}" value="${b.units}" step="0.25" min="0.25">u</div>
@@ -743,33 +763,71 @@ function renderResultsByDate(settled) {
   return html;
 }
 
+// Shared field set for both the manual-log form (blank, new bet) and the
+// edit-existing-bet form (pre-filled) -- explicit feedback (2026-10-30):
+// "i wanna be able to change like the actual pick, not just the unit in
+// case i make a mistake putting it in". Same class names in both
+// contexts (bf-*), scoped by whichever wrapper (data-manual-log vs
+// data-edit-bet) the caller queries within -- same pattern already used
+// for the tip-based log-form's inputs.
+function betFieldsForm(bet) {
+  const sport = bet.sport || "nba";
+  const dateVal = bet.game_date || new Date().toISOString().slice(0, 10);
+  return `
+    <label class="form-label">Sport</label>
+    <select class="form-input bf-sport-input">
+      ${["nba", "epl", "nbl", "nfl", "nrl", "afl", "bbl", "other"]
+        .map((s) => `<option value="${s}" ${s === sport ? "selected" : ""}>${s.toUpperCase()}</option>`)
+        .join("")}
+    </select>
+    <label class="form-label">Matchup / event</label>
+    <input type="text" class="form-input bf-matchup-input" value="${escapeHtml(bet.matchup || "")}" placeholder="e.g. Lakers @ Celtics">
+    <label class="form-label">Market</label>
+    <input type="text" class="form-input bf-market-input" value="${escapeHtml(bet.market || "")}" placeholder="e.g. Player Prop, Win, First Basket">
+    <label class="form-label">Selection</label>
+    <input type="text" class="form-input bf-selection-input" value="${escapeHtml(bet.selection || "")}" placeholder="e.g. LeBron James Over 25.5 Points">
+    <label class="form-label">Odds</label>
+    <input type="number" class="form-input bf-odds-input" step="0.01" min="1.01" value="${bet.odds_decimal || ""}" placeholder="e.g. 1.91">
+    <label class="form-label">Units</label>
+    <input type="number" class="form-input bf-units-input" step="0.25" min="0.25" value="${bet.units || 1}">
+    <label class="form-label">App / bookmaker</label>
+    <select class="form-input bf-bookmaker-input">${bookmakerOptions(bet.bookmaker || "")}</select>
+    <label class="form-label">Game date</label>
+    <input type="date" class="form-input bf-date-input" value="${dateVal}">
+    <label class="form-label">Notes (optional)</label>
+    <input type="text" class="form-input bf-notes-input" value="${escapeHtml(bet.notes || "")}" placeholder="Anything you want to remember">`;
+}
+
+function readBetFieldsForm(formEl) {
+  return {
+    sport: formEl.querySelector(".bf-sport-input").value,
+    matchup: formEl.querySelector(".bf-matchup-input").value.trim(),
+    market: formEl.querySelector(".bf-market-input").value.trim() || "Other",
+    selection: formEl.querySelector(".bf-selection-input").value.trim(),
+    odds_decimal: parseFloat(formEl.querySelector(".bf-odds-input").value),
+    units: parseFloat(formEl.querySelector(".bf-units-input").value) || 1,
+    bookmaker: formEl.querySelector(".bf-bookmaker-input").value.trim(),
+    game_date: formEl.querySelector(".bf-date-input").value || undefined,
+    notes: formEl.querySelector(".bf-notes-input").value.trim(),
+  };
+}
+
 function manualLogForm() {
-  const today = new Date().toISOString().slice(0, 10);
   return `
     <div class="log-form" data-manual-log="1">
-      <label class="form-label">Sport</label>
-      <select class="form-input manual-sport-input">
-        ${["nba", "epl", "nbl", "nfl", "nrl", "afl", "bbl", "other"]
-          .map((s) => `<option value="${s}">${s.toUpperCase()}</option>`)
-          .join("")}
-      </select>
-      <label class="form-label">Matchup / event</label>
-      <input type="text" class="form-input manual-matchup-input" placeholder="e.g. Lakers @ Celtics">
-      <label class="form-label">Market</label>
-      <input type="text" class="form-input manual-market-input" placeholder="e.g. Player Prop, Win, First Basket">
-      <label class="form-label">Selection</label>
-      <input type="text" class="form-input manual-selection-input" placeholder="e.g. LeBron James Over 25.5 Points">
-      <label class="form-label">Odds</label>
-      <input type="number" class="form-input manual-odds-input" step="0.01" min="1.01" placeholder="e.g. 1.91">
-      <label class="form-label">Units</label>
-      <input type="number" class="form-input manual-units-input" step="0.25" min="0.25" value="1">
-      <label class="form-label">App / bookmaker</label>
-      <select class="form-input manual-bookmaker-input">${bookmakerOptions("")}</select>
-      <label class="form-label">Game date</label>
-      <input type="date" class="form-input manual-date-input" value="${today}">
-      <label class="form-label">Notes (optional)</label>
-      <input type="text" class="form-input manual-notes-input" placeholder="Anything you want to remember">
+      ${betFieldsForm({})}
       <button class="log-btn" data-confirm-manual-log="1">Confirm</button>
+    </div>`;
+}
+
+function editBetForm(b) {
+  return `
+    <div class="log-form" data-edit-bet="${b.id}">
+      ${betFieldsForm(b)}
+      <div class="edit-bet-actions">
+        <button class="log-btn" data-confirm-edit-bet="${b.id}">Save</button>
+        <button class="log-btn secondary" data-cancel-edit-bet="1">Cancel</button>
+      </div>
     </div>`;
 }
 
@@ -1062,25 +1120,38 @@ function init() {
     const confirmManualBtn = e.target.closest("[data-confirm-manual-log]");
     if (confirmManualBtn) {
       const formEl = confirmManualBtn.closest("[data-manual-log]");
-      const matchup = formEl.querySelector(".manual-matchup-input").value.trim();
-      const selection = formEl.querySelector(".manual-selection-input").value.trim();
-      const odds = parseFloat(formEl.querySelector(".manual-odds-input").value);
-      if (!matchup || !selection || !(odds > 1)) {
+      const fields = readBetFieldsForm(formEl);
+      if (!fields.matchup || !fields.selection || !(fields.odds_decimal > 1)) {
         alert("Matchup, selection and odds (greater than 1) are required.");
         return;
       }
-      logBetManual({
-        sport: formEl.querySelector(".manual-sport-input").value,
-        matchup,
-        market: formEl.querySelector(".manual-market-input").value.trim() || "Other",
-        selection,
-        odds_decimal: odds,
-        units: parseFloat(formEl.querySelector(".manual-units-input").value) || 1,
-        bookmaker: formEl.querySelector(".manual-bookmaker-input").value.trim(),
-        game_date: formEl.querySelector(".manual-date-input").value || undefined,
-        notes: formEl.querySelector(".manual-notes-input").value.trim(),
-      });
+      logBetManual(fields);
       manualLogFormOpen = false;
+      renderTab(activeTab);
+      return;
+    }
+    const openEditBtn = e.target.closest("[data-open-edit-bet]");
+    if (openEditBtn) {
+      editingBetId = openEditBtn.dataset.openEditBet;
+      renderTab(activeTab);
+      return;
+    }
+    const cancelEditBtn = e.target.closest("[data-cancel-edit-bet]");
+    if (cancelEditBtn) {
+      editingBetId = null;
+      renderTab(activeTab);
+      return;
+    }
+    const confirmEditBtn = e.target.closest("[data-confirm-edit-bet]");
+    if (confirmEditBtn) {
+      const formEl = confirmEditBtn.closest("[data-edit-bet]");
+      const fields = readBetFieldsForm(formEl);
+      if (!fields.matchup || !fields.selection || !(fields.odds_decimal > 1)) {
+        alert("Matchup, selection and odds (greater than 1) are required.");
+        return;
+      }
+      updateBetFields(confirmEditBtn.dataset.confirmEditBet, fields);
+      editingBetId = null;
       renderTab(activeTab);
       return;
     }

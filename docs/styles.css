@@ -242,6 +242,31 @@ select.form-input {
   line-height: 1;
   padding: 4px;
 }
+.edit-bet-btn {
+  position: absolute;
+  top: 8px;
+  right: 34px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
+}
+.edit-bet-btn:hover { color: var(--accent); }
+
+.edit-bet-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+.edit-bet-actions .log-btn { margin-top: 0; flex: 1; }
+.log-btn.secondary {
+  background: none;
+  color: var(--text-dim);
+  border: 1px solid var(--panel-border);
+}
 
 .bets-summary {
   display: flex;

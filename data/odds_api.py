@@ -35,7 +35,23 @@ def _request(url: str, params: dict):
         )
     last_error = None
     for i, key in enumerate(ODDS_API_KEYS):
-        resp = requests.get(url, params={**params, "apiKey": key}, timeout=15)
+        # Real bug (2026-10-30): a plain transient network error here (a
+        # ConnectionResetError, nothing to do with the API itself) used to
+        # propagate straight up uncaught and abort this entire sport's
+        # refresh -- confirmed live, hit this exact error twice in one
+        # session across both this file and data/espn.py. One retry on
+        # THIS key before moving on, same spirit as the quota-exhausted
+        # fallback below -- a network blip isn't a reason to give up the
+        # whole call.
+        resp = None
+        for attempt in range(2):
+            try:
+                resp = requests.get(url, params={**params, "apiKey": key}, timeout=15)
+                break
+            except requests.exceptions.RequestException as e:
+                last_error = OddsApiError(f"Odds API request failed: {e}")
+        if resp is None:
+            continue
         if resp.status_code == 200:
             remaining = resp.headers.get("x-requests-remaining")
             if remaining is not None:

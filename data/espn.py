@@ -10,6 +10,7 @@ treat it as a bit fragile (wrap calls, don't assume it's forever stable).
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -33,11 +34,33 @@ def _local_date(iso_timestamp: str) -> str:
     return dt_utc.astimezone(AU_TZ).date().isoformat()
 
 
+# Real bug (2026-10-30): a plain transient network error (a
+# ConnectionResetError, nothing ESPN-side) used to propagate straight up
+# uncaught, crashing whatever called this -- confirmed live, hit this
+# exact error twice in one session (here and in data/odds_api.py), each
+# time silently aborting that sport's entire refresh. This file's own
+# docstring already says "treat it as a bit fragile" -- this makes the
+# code actually do that for network-level failures, not just non-200
+# responses.
+_MAX_RETRIES = 2
+_RETRY_DELAY_SECONDS = 1.5
+
+
 def _get(url: str, params: dict | None = None) -> dict:
-    resp = requests.get(url, params=params or {}, timeout=15)
-    if resp.status_code != 200:
-        raise EspnError(f"ESPN error {resp.status_code} for {url}: {resp.text[:200]}")
-    return resp.json()
+    last_error = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            resp = requests.get(url, params=params or {}, timeout=15)
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            if attempt < _MAX_RETRIES:
+                time.sleep(_RETRY_DELAY_SECONDS)
+                continue
+            raise EspnError(f"ESPN request failed after {_MAX_RETRIES + 1} attempts for {url}: {e}") from e
+        else:
+            if resp.status_code != 200:
+                raise EspnError(f"ESPN error {resp.status_code} for {url}: {resp.text[:200]}")
+            return resp.json()
 
 
 def get_teams(espn_sport: str, espn_league: str) -> list[dict]:

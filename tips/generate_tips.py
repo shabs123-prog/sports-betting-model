@@ -446,7 +446,20 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
         matchup = f"{event['away_team']} @ {event['home_team']}"
         game_date, game_time_local = _local_game_datetime(event["commence_time"])
         for market in extra_markets:
-            data = odds_api.fetch_event_odds(cfg["odds_key"], event["id"], market)
+            # Real bug (2026-10-30): a single transient network error here
+            # (a plain ConnectionResetError, not even an Odds API-specific
+            # failure) used to propagate all the way up and abort the WHOLE
+            # sport's refresh, discarding this function's progress on every
+            # other event -- confirmed live, this is exactly what silently
+            # left EPL stale for several days despite the scheduled refresh
+            # reporting "success" (run_auto_refresh.py's outer per-sport
+            # catch only logs it, doesn't fail the job). One flaky per-event
+            # call shouldn't cost every other event's BTTS check.
+            try:
+                data = odds_api.fetch_event_odds(cfg["odds_key"], event["id"], market)
+            except Exception as e:
+                log(f"[{sport}] {market} fetch failed for {matchup}, skipping this one: {e}")
+                continue
             outcome_points = odds_api.consensus_points(data, market, allowed_bookmakers=AU_BOOKMAKERS)
             books = odds_api.bookmaker_books(data, market, outcome_points, allowed_bookmakers=AU_BOOKMAKERS)
             if not books:
