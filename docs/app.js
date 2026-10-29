@@ -19,6 +19,7 @@ const REFRESH_PROXY_SECRET = "";
 
 let state = { data: null };
 let editingTipKey = null; // which card (by tipKey) currently has its log-bet form open
+let manualLogFormOpen = false; // the standalone "+ Log a bet manually" form in My Bets
 
 function escapeHtml(s) {
   if (s === null || s === undefined) return "";
@@ -43,6 +44,17 @@ function fmtPct(v) {
 function fmtMoney(v, signed) {
   const sign = v < 0 ? "-" : signed ? "+" : "";
   return `${sign}$${Math.abs(v).toFixed(2)}`;
+}
+
+// "27 October" style, for grouping My Bets results by day -- fmtWhen
+// above stays DD/MM/YY (compact, used on every tip card); this is only
+// for a section heading, where the longer form reads better.
+function fmtResultsDateLabel(isoDate) {
+  const parts = String(isoDate).split("-");
+  if (parts.length !== 3) return isoDate;
+  const [y, m, d] = parts;
+  const date = new Date(Number(y), Number(m) - 1, Number(d));
+  return date.toLocaleDateString("en-AU", { day: "numeric", month: "long" });
 }
 
 function fmtWhen(t) {
@@ -423,6 +435,36 @@ function logBetFromTip(t, overrides) {
   saveBets(bets);
 }
 
+// Explicit ask (2026-10-29): "have an area where i can log bets and put
+// what bet i did coz im using claude to make picks for me with player
+// props, its not the app but i can still manually log bets in" -- a
+// standalone entry point, not tied to any tip this app generated. Market
+// is free text here (not the fixed h2h/spreads/totals/btts set) so a
+// player prop or anything else not in this app's own markets still has
+// somewhere to go. No tier (nothing here came from this app's own
+// edge_pct) -- stays out of the By Tier breakdown's tier groups, same
+// as any other pre-existing bet with no tier recorded.
+function logBetManual(fields) {
+  const bets = loadBets();
+  bets.unshift({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    ts: new Date().toISOString(),
+    key: null,
+    sport: fields.sport,
+    matchup: fields.matchup,
+    market: fields.market,
+    selection: fields.selection,
+    bookmaker: fields.bookmaker,
+    odds_decimal: fields.odds_decimal,
+    units: fields.units,
+    notes: fields.notes || "",
+    game_date: fields.game_date || undefined,
+    result: "pending",
+    tier: null,
+  });
+  saveBets(bets);
+}
+
 function settleBet(id, result, autoGraded) {
   const bets = loadBets();
   const bet = bets.find((b) => b.id === id);
@@ -630,6 +672,63 @@ function renderTierBreakdown(settled) {
   </details>`;
 }
 
+// Groups settled bets by game_date into collapsible sections (newest
+// first) so a long results history doesn't bombard the page -- explicit
+// feedback (2026-10-30): "have a drop box for each date... 27 october
+// results, 28 october results". Bets with no game_date (manually logged
+// before a date was picked, or very old bets from before game_date
+// existed at all) land in one "Undated" group at the end rather than
+// being dropped.
+function renderResultsByDate(settled) {
+  const groups = {};
+  for (const b of settled) {
+    const key = b.game_date || "";
+    (groups[key] = groups[key] || []).push(b);
+  }
+  const dated = Object.keys(groups).filter((k) => k).sort().reverse();
+  let html = "";
+  for (const key of dated) {
+    const dayBets = groups[key];
+    const dayNet = dayBets.reduce((s, b) => s + (b.profit_units || 0), 0);
+    const label = `${fmtResultsDateLabel(key)} (${dayBets.length} bet${dayBets.length === 1 ? "" : "s"} · ${dayNet >= 0 ? "+" : ""}${dayNet.toFixed(2)}u)`;
+    html += expander(label, dayBets.map(betCard).join(""));
+  }
+  if (groups[""]) {
+    html += expander(`Undated (${groups[""].length})`, groups[""].map(betCard).join(""));
+  }
+  return html;
+}
+
+function manualLogForm() {
+  const today = new Date().toISOString().slice(0, 10);
+  return `
+    <div class="log-form" data-manual-log="1">
+      <label class="form-label">Sport</label>
+      <select class="form-input manual-sport-input">
+        ${["nba", "epl", "nbl", "nfl", "nrl", "afl", "bbl", "other"]
+          .map((s) => `<option value="${s}">${s.toUpperCase()}</option>`)
+          .join("")}
+      </select>
+      <label class="form-label">Matchup / event</label>
+      <input type="text" class="form-input manual-matchup-input" placeholder="e.g. Lakers @ Celtics">
+      <label class="form-label">Market</label>
+      <input type="text" class="form-input manual-market-input" placeholder="e.g. Player Prop, Win, First Basket">
+      <label class="form-label">Selection</label>
+      <input type="text" class="form-input manual-selection-input" placeholder="e.g. LeBron James Over 25.5 Points">
+      <label class="form-label">Odds</label>
+      <input type="number" class="form-input manual-odds-input" step="0.01" min="1.01" placeholder="e.g. 1.91">
+      <label class="form-label">Units</label>
+      <input type="number" class="form-input manual-units-input" step="0.25" min="0.25" value="1">
+      <label class="form-label">App / bookmaker</label>
+      <select class="form-input manual-bookmaker-input">${bookmakerOptions("")}</select>
+      <label class="form-label">Game date</label>
+      <input type="date" class="form-input manual-date-input" value="${today}">
+      <label class="form-label">Notes (optional)</label>
+      <input type="text" class="form-input manual-notes-input" placeholder="Anything you want to remember">
+      <button class="log-btn" data-confirm-manual-log="1">Confirm</button>
+    </div>`;
+}
+
 function renderMyBets() {
   autoGradeBets();
   const bets = loadBets();
@@ -641,6 +740,15 @@ function renderMyBets() {
     <input type="number" id="unit-size-input" step="1" min="0" placeholder="e.g. 10" value="${unitSize || ""}">
     <span class="caption">optional, just for the $ figures below -- doesn't change sizing</span>
   </div>`;
+
+  // Not tied to any tip this app generated -- for a bet placed off a pick
+  // from somewhere else (player props, etc.) that you still want tracked
+  // here alongside everything else.
+  html += `<section><h2>Log a bet manually</h2>`;
+  html += manualLogFormOpen
+    ? manualLogForm()
+    : `<button class="log-btn" data-open-manual-log="1">+ Log a bet manually</button>`;
+  html += `</section>`;
 
   if (!bets.length) {
     html += `<div class="muted-note">No bets logged yet.</div>`;
@@ -671,11 +779,15 @@ function renderMyBets() {
   }
   html += renderTierBreakdown(settled);
 
+  // Explicit feedback (2026-10-30): "like a my bets section just for my
+  // bets then another section of results" -- Pending is "my bets" (active,
+  // not yet decided); Results is the settled history, grouped by date so
+  // it doesn't bombard the page as it grows.
   if (pending.length) {
     html += `<section><h2>Pending (${pending.length})</h2>${pending.map(betCard).join("")}</section>`;
   }
   if (settled.length) {
-    html += `<section><h2>Settled (${settled.length})</h2>${settled.map(betCard).join("")}</section>`;
+    html += `<section><h2>Results (${settled.length})</h2>${renderResultsByDate(settled)}</section>`;
   }
   return html;
 }
@@ -893,6 +1005,37 @@ function init() {
         notes: notes || undefined,
       });
       editingTipKey = null;
+      renderTab(activeTab);
+      return;
+    }
+    const openManualBtn = e.target.closest("[data-open-manual-log]");
+    if (openManualBtn) {
+      manualLogFormOpen = true;
+      renderTab(activeTab);
+      return;
+    }
+    const confirmManualBtn = e.target.closest("[data-confirm-manual-log]");
+    if (confirmManualBtn) {
+      const formEl = confirmManualBtn.closest("[data-manual-log]");
+      const matchup = formEl.querySelector(".manual-matchup-input").value.trim();
+      const selection = formEl.querySelector(".manual-selection-input").value.trim();
+      const odds = parseFloat(formEl.querySelector(".manual-odds-input").value);
+      if (!matchup || !selection || !(odds > 1)) {
+        alert("Matchup, selection and odds (greater than 1) are required.");
+        return;
+      }
+      logBetManual({
+        sport: formEl.querySelector(".manual-sport-input").value,
+        matchup,
+        market: formEl.querySelector(".manual-market-input").value.trim() || "Other",
+        selection,
+        odds_decimal: odds,
+        units: parseFloat(formEl.querySelector(".manual-units-input").value) || 1,
+        bookmaker: formEl.querySelector(".manual-bookmaker-input").value.trim(),
+        game_date: formEl.querySelector(".manual-date-input").value || undefined,
+        notes: formEl.querySelector(".manual-notes-input").value.trim(),
+      });
+      manualLogFormOpen = false;
       renderTab(activeTab);
       return;
     }

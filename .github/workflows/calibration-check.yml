@@ -11,7 +11,9 @@ name: Daily calibration check
 # through Actions logs to see whether anything drifted.
 on:
   schedule:
-    - cron: "0 21 * * *"  # ~8am AEDT / 7am AEST -- after the main tips refresh
+    # Shifted alongside the main tips refresh (2026-10-30: 7am -> 9am AEDT) --
+    # kept at roughly an hour after it, same spacing as before.
+    - cron: "0 23 * * *"  # ~10am AEDT / 9am AEST -- after the main tips refresh
   workflow_dispatch: {}
 
 jobs:

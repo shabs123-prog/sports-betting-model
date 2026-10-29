@@ -22,13 +22,15 @@ name: Daily tips refresh
 
 on:
   schedule:
-    - cron: "0 20 * * *"  # ~7am AEDT / 6am AEST -- full refresh, all auto_refresh sports
-    # NBA-only, ~6pm AEDT/5pm AEST the evening BEFORE game day -- NBA plays
-    # daily (unlike EPL/NFL), and explicit feedback is that 6am data is too
-    # early relative to when bets actually get placed (the evening before).
-    # Adds only ~6 credits/day (1 sport's bulk pull) -- affordable with 3
-    # keys/1500 a month now, wasn't with 2/1000.
-    - cron: "0 7 * * *"   # ~6pm AEDT / 5pm AEST
+    # Explicit feedback (2026-10-30): shifted from ~7am/~6pm to ~9am/~8pm
+    # AEDT -- the old times are gone, not just supplemented.
+    - cron: "0 22 * * *"  # ~9am AEDT / 8am AEST -- full refresh, all auto_refresh sports
+    # NBA-only, ~8pm AEDT/7pm AEST the evening BEFORE game day -- NBA plays
+    # daily (unlike EPL/NFL), and explicit feedback is that the 9am refresh
+    # alone is too early relative to when bets actually get placed (the
+    # evening before). Adds only ~6 credits/day (1 sport's bulk pull) --
+    # affordable with 4 keys/2000 a month now.
+    - cron: "0 9 * * *"   # ~8pm AEDT / 7pm AEST
   workflow_dispatch:
     inputs:
       sport:
@@ -59,12 +61,12 @@ jobs:
       - run: pip install -r requirements.txt
 
       # Which sport(s) to refresh, in priority order: a manual "sport" input
-      # wins if present; otherwise the 6pm cron (github.event.schedule
-      # equals its own cron string) means NBA only; otherwise (the 7am
+      # wins if present; otherwise the 8pm cron (github.event.schedule
+      # equals its own cron string) means NBA only; otherwise (the 9am
       # cron, or anything else) means "all", same as the original
       # single-schedule behaviour.
       - name: Refresh sport(s)
-        run: python -m scripts.run_auto_refresh "${{ github.event.inputs.sport || (github.event.schedule == '0 7 * * *' && 'nba' || 'all') }}"
+        run: python -m scripts.run_auto_refresh "${{ github.event.inputs.sport || (github.event.schedule == '0 9 * * *' && 'nba' || 'all') }}"
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           # Optional additional free-tier keys -- data/odds_api.py falls
