@@ -60,15 +60,13 @@ RISK_COLOR = {"Not Risky": "green", "Neutral": "orange", "Risky": "red"}
 TIER_COLOR = {"Strong": "green", "Moderate": "orange", "Lean": "gray"}
 MARKET_LABEL = {"h2h": "Win", "spreads": "Handicap", "totals": "Line", "btts": "BTTS"}
 WEEK_AHEAD_DAYS = 14  # how far out This Week looks
-# Matches WEEK_AHEAD_DAYS -- see pwa/build_site.py's comment for why the
-# brief 1-day version got walked back same-day (EPL/NFL/NBL tabs were
-# going near-empty whenever their next game sat a few days out).
-SPORT_TAB_DAYS_AHEAD = WEEK_AHEAD_DAYS
-# NFL-only exception -- see pwa/build_site.py's comment: a 32-team league
-# generates too much volume for its own tab at the full window ("too many
-# slips... bombard my screen"), a problem EPL/NBL/NBA explicitly don't
-# have. Genuinely strong NFL picks further out still surface via This Week.
-SPORT_TAB_DAYS_AHEAD_OVERRIDES = {"nfl": 1}
+# Matches pwa/build_site.py -- see its comment for the full history. EPL
+# and NBL's own tabs stay on a weekly window (low frequency per team);
+# every other sport shows only the next calendar day's slate.
+WEEKLY_SPORTS = {"epl", "nbl"}
+SPORT_WEEK_AHEAD_DAYS = 7
+LONGSHOT_ODDS_THRESHOLD = 3.0  # matches pwa/build_site.py's "Long Shots" section
+NEXT_GAME_DAY_MAX_FALLBACK_DAYS = 14  # matches pwa/build_site.py
 
 
 def _odds_range() -> tuple[float, float]:
@@ -234,19 +232,28 @@ def render_sport_tab(sport: str):
     if not cfg.get("auto_refresh"):
         st.caption("Not auto-refreshed daily (off-season or markets not posted yet) — use Refresh above to check manually.")
 
-    today_str = _au_today().isoformat()
-    days_ahead = SPORT_TAB_DAYS_AHEAD_OVERRIDES.get(sport, SPORT_TAB_DAYS_AHEAD)
-    end_str = (_au_today() + timedelta(days=days_ahead)).isoformat()
+    today = _au_today()
+    if sport in WEEKLY_SPORTS:
+        start_str = today.isoformat()
+        end_str = (today + timedelta(days=SPORT_WEEK_AHEAD_DAYS)).isoformat()
+    else:
+        start_str = end_str = (today + timedelta(days=1)).isoformat()
 
-    value_tips = db.get_tips_in_range(today_str, end_str, tip_type="value", sport=sport)
-    prediction_tips = db.get_tips_in_range(today_str, end_str, tip_type="prediction", sport=sport) if cfg["has_history"] else []
-    knowledge_tips = db.get_tips_in_range(today_str, end_str, tip_type="knowledge", sport=sport) if cfg.get("show_knowledge", True) else []
+    value_tips = db.get_tips_in_range(start_str, end_str, tip_type="value", sport=sport)
+    prediction_tips = db.get_tips_in_range(start_str, end_str, tip_type="prediction", sport=sport) if cfg["has_history"] else []
+    knowledge_tips = db.get_tips_in_range(start_str, end_str, tip_type="knowledge", sport=sport) if cfg.get("show_knowledge", True) else []
 
     # Falls forward to the next game day when this window is completely
     # empty -- see pwa/build_site.py's build_sport() for the full reasoning
     # (mirrored here so the dashboard and PWA never disagree).
     if not (value_tips or prediction_tips or knowledge_tips):
         next_date = db.get_next_tip_date(sport, end_str)
+        # See pwa/build_site.py's build_sport() for why this is capped --
+        # a sport with nothing posted for weeks (e.g. only a far-future
+        # showcase date priced up early) shouldn't "fall forward" into
+        # showing that as if it's the next normal game day.
+        if next_date and (date.fromisoformat(next_date) - date.fromisoformat(end_str)).days > NEXT_GAME_DAY_MAX_FALLBACK_DAYS:
+            next_date = None
         if next_date:
             st.caption(f"Nothing until {next_date} -- showing that game day instead.")
             value_tips = db.get_tips_in_range(next_date, next_date, tip_type="value", sport=sport)
@@ -255,8 +262,17 @@ def render_sport_tab(sport: str):
                 if cfg.get("show_knowledge", True):
                     knowledge_tips = db.get_tips_in_range(next_date, next_date, tip_type="knowledge", sport=sport)
 
+    longshots = [t for t in value_tips if t["odds_decimal"] >= LONGSHOT_ODDS_THRESHOLD]
+    value_tips = [t for t in value_tips if t["odds_decimal"] < LONGSHOT_ODDS_THRESHOLD]
+
     st.subheader("Value Bets")
     render_value_cards(value_tips)
+
+    if longshots:
+        st.divider()
+        st.subheader("Long Shots")
+        st.caption(f"Odds @{LONGSHOT_ODDS_THRESHOLD:g} or higher — bigger variance, smaller stakes.")
+        render_value_cards(longshots)
 
     if cfg["has_history"]:
         st.divider()

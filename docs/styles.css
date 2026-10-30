@@ -242,20 +242,6 @@ select.form-input {
   line-height: 1;
   padding: 4px;
 }
-.edit-bet-btn {
-  position: absolute;
-  top: 8px;
-  right: 34px;
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 0.95rem;
-  line-height: 1;
-  padding: 4px;
-  cursor: pointer;
-}
-.edit-bet-btn:hover { color: var(--accent); }
-
 .edit-bet-actions {
   display: flex;
   gap: 10px;

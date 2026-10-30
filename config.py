@@ -163,14 +163,18 @@ SPORT_CONFIG = {
         "espn_league": "eng.1",
         "markets": ["h2h", "spreads", "totals"],
         "auto_refresh": True,
-        # BTTS isn't on the bulk /odds endpoint (confirmed: 422s there) --
-        # it needs a separate per-event call, which costs quota per game
-        # rather than once per sport. Real coverage though: 4 of 5 held
-        # bookmakers post it (SportsBet/Ladbrokes/PointsBet/Betfair),
-        # unlike EPL's totals/spreads which have zero coverage from any of
-        # them. Restricted to EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS, not the
+        # BTTS and Over/Under goals aren't on the bulk /odds endpoint
+        # (confirmed: 422s there) -- both need a separate per-event call,
+        # which costs quota per game rather than once per sport. BTTS: 4 of
+        # 5 held bookmakers post it (SportsBet/Ladbrokes/PointsBet/Betfair).
+        # Totals: the bulk endpoint genuinely has zero EPL coverage (still
+        # true), but the per-event endpoint is a different story -- live-
+        # checked 2026-10-31 and PointsBet (AU) posts a real goals total
+        # here (not always exactly 2.5 -- whatever line's live that day),
+        # same "best price among accounts you hold" handling as every other
+        # market. Restricted to EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS, not the
         # full window, to keep the extra per-event cost manageable.
-        "extra_event_markets": ["btts"],
+        "extra_event_markets": ["btts", "totals"],
     },
     "nbl": {
         "odds_key": "basketball_nbl",

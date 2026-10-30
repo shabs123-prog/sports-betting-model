@@ -32,7 +32,7 @@ from knowledge import situational
 from models import edge, elo
 from models.devig import devig_book
 from models.kelly import kelly_fraction
-from models.scoring import build_scoring_averages, injury_adjusted_avg, project_matchup
+from models.scoring import PRIOR_SEASON_SCORING_WEIGHT, build_scoring_averages, injury_adjusted_avg, project_matchup
 from models.team_names import build_nickname_index, resolve
 
 
@@ -175,6 +175,23 @@ PREDICTION_ELIGIBLE_SPORTS = {"nba", "nbl", "nfl", "afl"}
 # genuinely strongest (2.19x-4.01x clear) -- a real quality cut, not an
 # arbitrary number.
 PREDICTION_MIN_MODEL_PROB = 0.60  # was 0.55 -- barely above a coin flip isn't "genuine reasoning"
+# Real bug found 2026-10-31: the 0.60 bar above was checked against NBA's
+# own calibration (CALIBRATION.md, 60-70% band: 63.1% actual, gap only
+# -1.9% -- a "60%" NBA pick really does win about 60% of the time) and
+# then applied globally to every sport in PREDICTION_ELIGIBLE_SPORTS
+# without re-checking the others. They're not the same: NBL's own
+# 60-70% band is 59.1% actual (gap -5.9%), NFL's is 55.6% (gap -9.4%),
+# AFL's is 59.5% (gap -5.5%) -- a "60-65%" lean on any of these three is,
+# empirically, close to a coin flip once you account for how overconfident
+# that band already is. Confirmed live: the NBL h2h lean that went 0/3
+# this week (New Zealand Breakers, model_prob 59.3%) sat exactly in this
+# overconfident band. Each of these three sports' 70-80% band is much
+# closer to (NBL: 72.5%, gap -2.5%) or better than (NFL: 85.7%, AFL:
+# 88.5% -- small-ish samples, but consistently the safe direction to be
+# wrong in) its claimed probability, so 0.70 is the calibration-backed
+# bar for them specifically -- NBA keeps 0.60 since its own number holds up.
+# Re-check against CALIBRATION.md after any Elo/data change.
+PREDICTION_MIN_MODEL_PROB_OVERRIDES = {"nbl": 0.70, "nfl": 0.70, "afl": 0.70}
 # How far the points-scored/allowed projection has to clear a spreads/totals
 # line (as a fraction of the projected total) before it's worth a lean --
 # same idea as a value tip's min-edge bar, just applied to a points gap
@@ -471,13 +488,14 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
             for outcome_name, price_info in best_prices.items():
                 decimal_odds = price_info["price"]
                 bookmaker = price_info["bookmaker"]
+                point = price_info.get("point")
                 fair_prob = au_fair_probs.get(outcome_name)
                 if fair_prob is None:
                     continue
 
                 line_history_rows.append({
                     "sport": sport, "matchup": matchup, "game_date": game_date,
-                    "market": market, "outcome": outcome_name, "point": None,
+                    "market": market, "outcome": outcome_name, "point": point,
                     "fair_prob": fair_prob, "fair_prob_source": "AU consensus",
                 })
 
@@ -492,7 +510,7 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
                     "sport": sport,
                     "matchup": matchup,
                     "market": market,
-                    "selection": outcome_name,
+                    "selection": _format_selection(outcome_name, point, market),
                     "bookmaker": bookmaker,
                     "odds_decimal": decimal_odds,
                     "model_prob": None,
@@ -526,7 +544,14 @@ def run(sport: str = "nba", log=print) -> dict:
         # Same finished_games Elo already trains on -- no extra ESPN call.
         # Points-scored/allowed averages, used to project a likely margin/
         # total for spreads/totals model leans (Elo only predicts win/loss).
-        scoring_averages = build_scoring_averages(finished_games)
+        # Prior season discounted (see PRIOR_SEASON_SCORING_WEIGHT) so a
+        # team's current-season scoring isn't drowned out by a full season
+        # of stale games -- the exact bug that sized two bad totals leans
+        # this week (Heat/Hawks, Kings/Pelicans both missed high).
+        prior_season_year = _espn_season_years(sport)[0]
+        scoring_averages = build_scoring_averages(
+            finished_games, season_weights={prior_season_year: PRIOR_SEASON_SCORING_WEIGHT}
+        )
         team_id_map = espn.get_team_id_map(cfg["espn_sport"], cfg["espn_league"])
         log(f"[{sport}] trained Elo for {len(ratings)} teams from {len(finished_games)} games.")
     else:
@@ -743,8 +768,9 @@ def run(sport: str = "nba", log=print) -> dict:
         # value tip, so it's a separate tip_type with its own flat (smaller)
         # stake, never mixed into the value-tip count or sizing.
         if sport in PREDICTION_ELIGIBLE_SPORTS and model_probs:
+            min_model_prob = PREDICTION_MIN_MODEL_PROB_OVERRIDES.get(sport, PREDICTION_MIN_MODEL_PROB)
             for outcome_name, model_prob in model_probs.items():
-                if model_prob < PREDICTION_MIN_MODEL_PROB or outcome_name in h2h_value_outcomes:
+                if model_prob < min_model_prob or outcome_name in h2h_value_outcomes:
                     continue
                 price_info = h2h_best_prices.get(outcome_name)
                 if not price_info:

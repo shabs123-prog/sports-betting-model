@@ -202,15 +202,14 @@ function renderThisWeek() {
   // for just another section.
   let html = `<div class="must-bet-banner">
     <div class="must-bet-title">🔒 MUST-BET THIS WEEK (${tw.must_bet.length})</div>
-    <div class="must-bet-sub">Moderate-or-better edge, Not Risky/Neutral win chance, within ${lo}-${hi} odds — if you only place a few bets this week, place these.</div>
+    <div class="must-bet-sub">If you only place a few bets this week, place these.</div>
   </div>`;
   html += tw.must_bet.length
     ? tw.must_bet.map(tipCard).join("")
     : `<div class="info-box">Nothing clears the Must-Bet bar this week — see Recommended below.</div>`;
 
   html += `<section>
-    <h2>Recommended bets this week (${tw.recommended.length})</h2>
-    <p class="caption">All within ${lo}-${hi} odds, prioritising Line/Handicap.</p>`;
+    <h2>Recommended bets this week (${tw.recommended.length})</h2>`;
   html += tw.recommended.length ? tw.recommended.map(tipCard).join("") : `<div class="muted-note">No value bets for this view right now.</div>`;
   html += `</section>`;
 
@@ -289,7 +288,7 @@ function renderSport(sport) {
   // empty message below. Checked before the sections so it shows even
   // when has_history is false.
   const nothingHereAtAll =
-    !s.value_in_range.length && !s.value_outside_range.length &&
+    !s.value_in_range.length && !s.value_outside_range.length && !s.longshots.length &&
     !s.predictions.length && !s.knowledge.length;
   if (s.next_game_day) {
     html += `<div class="info-box">Nothing sooner — here's the next game day (${escapeHtml(s.next_game_day)}):</div>`;
@@ -302,6 +301,12 @@ function renderSport(sport) {
     ? s.value_in_range.map(tipCard).join("")
     : `<div class="muted-note">No value bets in the ${lo}-${hi} odds range for this view right now.</div>`;
   html += `</section>`;
+
+  if (s.longshots.length) {
+    html += `<section><h2>Long Shots (${s.longshots.length})</h2>
+      <p class="caption">Odds @3.00 or higher — bigger variance, smaller stakes.</p>
+      ${s.longshots.map(tipCard).join("")}</section>`;
+  }
 
   if (s.has_history) {
     html += `<section><h2>Predictions</h2><p class="caption">Model leans with no confirmed market edge — lower confidence than a Value Bet.</p>`;
@@ -661,22 +666,28 @@ function betCard(b) {
   if (editingBetId === b.id) {
     return `<div class="card">${editBetForm(b)}</div>`;
   }
+  // Explicit feedback (2026-10-30): the original edit trigger was a tiny
+  // unlabeled "✎" icon in the card's top corner -- technically there,
+  // but easy enough to miss on a phone that it read as "no button at
+  // all". A proper labeled button in the same row as the other actions
+  // (same visual language as "Change" below) instead.
   const actions = b.result === "pending"
     ? `<div class="bet-actions">
         <button class="bet-btn win" data-settle="${b.id}" data-result="win">Win</button>
         <button class="bet-btn loss" data-settle="${b.id}" data-result="loss">Loss</button>
         <button class="bet-btn push" data-settle="${b.id}" data-result="push">Push</button>
+        <button class="edit-result-btn" data-open-edit-bet="${b.id}">Edit</button>
       </div>`
     : `<div class="bet-settled-row">
         <div class="bet-result-tag ${escapeHtml(b.result)}">${escapeHtml(b.result.toUpperCase())}${
           b.profit_units !== undefined ? ` · ${b.profit_units >= 0 ? "+" : ""}${b.profit_units.toFixed(2)}u` : ""
         }${b.auto_graded ? ` · auto` : ""}</div>
         <button class="edit-result-btn" data-revert="${b.id}">Change</button>
+        <button class="edit-result-btn" data-open-edit-bet="${b.id}">Edit</button>
       </div>`;
   return `
     <div class="card">
       <button class="delete-bet" data-delete-bet="${b.id}" aria-label="Delete">×</button>
-      <button class="edit-bet-btn" data-open-edit-bet="${b.id}" aria-label="Edit">✎</button>
       <div class="matchup">${escapeHtml(b.sport.toUpperCase())}: ${escapeHtml(b.matchup)}</div>
       ${b.game_date ? `<div class="date">${escapeHtml(fmtWhen(b))}</div>` : ""}
       <div class="pick-line"><b>${escapeHtml(marketLabel(b.market))}</b> · ${escapeHtml(b.selection)} @ <b>${fmtOdds(b.odds_decimal)}</b> · ${escapeHtml(b.bookmaker)} · <input type="number" class="bet-units-input" data-bet-units="${b.id}" value="${b.units}" step="0.25" min="0.25">u</div>

@@ -15,23 +15,45 @@ from __future__ import annotations
 
 MIN_GAMES_FOR_PROJECTION = 5  # too few games = too noisy an average to trust
 
+# Real bug found 2026-10-31: this used to pool prior-season and current-
+# season games with equal weight. Checked against two actual misses from
+# the same week -- Heat @ Hawks (projected ~236-241, actual 246) and
+# Kings @ Pelicans (projected ~235-237, actual 252, a 15+ point miss) --
+# both unders lost, and the common thread is both teams' full-season
+# average was still mostly LAST season's games (71 current-season games
+# league-wide vs 1231 prior-season at the time, most teams on 3-6 games
+# so far), so a team scoring more this season than last had that drowned
+# out by stale data. Same idea as elo.SEASON_REGRESSION: a team's scoring
+# profile carries over from last season, but discounted, since rosters/
+# coaching/pace shift year to year. 0.3 isn't fit to any sport's data
+# specifically (same deliberately-simple philosophy as the rest of this
+# file) -- it just converts a prior-season game from counting as 1:1
+# recent signal to roughly a third as much, so there's still enough to
+# clear MIN_GAMES_FOR_PROJECTION early in a season, fading out as this
+# season's own game count grows.
+PRIOR_SEASON_SCORING_WEIGHT = 0.3
 
-def build_scoring_averages(games: list[dict]) -> dict[str, dict]:
+
+def build_scoring_averages(games: list[dict], season_weights: dict | None = None) -> dict[str, dict]:
     """
-    games: [{home_team, away_team, home_score, away_score}, ...] (same shape
-    data/espn.get_finished_games_for_training returns).
-    Returns {team: {"scored": avg_points_for, "allowed": avg_points_against, "games": n}}.
+    games: [{home_team, away_team, home_score, away_score, season}, ...]
+    (same shape data/espn.get_finished_games_for_training returns).
+    season_weights: optional {season_year: weight} -- a season missing from
+    this dict (or season_weights=None) defaults to weight 1.0. See
+    PRIOR_SEASON_SCORING_WEIGHT above for why the caller passes this.
+    Returns {team: {"scored": avg_points_for, "allowed": avg_points_against, "games": weighted_n}}.
     """
     totals: dict[str, dict] = {}
     for g in games:
+        weight = 1.0 if not season_weights else season_weights.get(g.get("season"), 1.0)
         for team, scored, allowed in (
             (g["home_team"], g["home_score"], g["away_score"]),
             (g["away_team"], g["away_score"], g["home_score"]),
         ):
-            d = totals.setdefault(team, {"scored_sum": 0.0, "allowed_sum": 0.0, "games": 0})
-            d["scored_sum"] += scored
-            d["allowed_sum"] += allowed
-            d["games"] += 1
+            d = totals.setdefault(team, {"scored_sum": 0.0, "allowed_sum": 0.0, "games": 0.0})
+            d["scored_sum"] += scored * weight
+            d["allowed_sum"] += allowed * weight
+            d["games"] += weight
     return {
         team: {
             "scored": d["scored_sum"] / d["games"],
