@@ -222,10 +222,20 @@ def build_sport(sport: str, cfg: dict) -> dict:
         start = today.isoformat()
         end = (today + timedelta(days=SPORT_WEEK_AHEAD_DAYS)).isoformat()
     else:
-        # "Day after" slate only -- a Monday-night update shows Tuesday's
-        # games, not today's. Single-day window (start == end), not a
-        # look-ahead range.
-        start = end = (today + timedelta(days=1)).isoformat()
+        # Target is "day after" (a Monday-night update should feature
+        # Tuesday's slate), but a single-day window is too brittle against
+        # odds-posting timing: real case found 2026-10-31, NBA books simply
+        # hadn't posted tomorrow's lines yet at refresh time, and a tip that
+        # can't exist in the db (no odds to price it against) can't be
+        # "fallen forward" to either -- so the tab went completely blank
+        # despite today's own slate having a real, live, un-shown value bet
+        # sitting right there (Chicago Bulls @ 8.25, 1.9% edge). Today's
+        # already-started games don't leak in here -- db.supersede_started_
+        # games() (called in main() below) already clears those out of
+        # "open" regardless of this window, so including today just adds a
+        # safety net, not stale picks.
+        start = today.isoformat()
+        end = (today + timedelta(days=1)).isoformat()
 
     in_range, out_range, longshots, predictions, knowledge = _sport_tips_for_window(sport, cfg, start, end, lo, hi)
 

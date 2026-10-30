@@ -237,7 +237,11 @@ def render_sport_tab(sport: str):
         start_str = today.isoformat()
         end_str = (today + timedelta(days=SPORT_WEEK_AHEAD_DAYS)).isoformat()
     else:
-        start_str = end_str = (today + timedelta(days=1)).isoformat()
+        # See pwa/build_site.py's build_sport() -- today + tomorrow, not
+        # tomorrow only, so a real odds-posting lag on tomorrow's slate
+        # doesn't blank the tab when today's own slate still has value.
+        start_str = today.isoformat()
+        end_str = (today + timedelta(days=1)).isoformat()
 
     value_tips = db.get_tips_in_range(start_str, end_str, tip_type="value", sport=sport)
     prediction_tips = db.get_tips_in_range(start_str, end_str, tip_type="prediction", sport=sport) if cfg["has_history"] else []
