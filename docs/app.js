@@ -312,6 +312,18 @@ function renderSport(sport) {
   html += s.value_in_range.length
     ? s.value_in_range.map(tipCard).join("")
     : `<div class="muted-note">No value bets in the ${lo}-${hi} odds range for this view right now.</div>`;
+  // Real bug found 2026-10-31: value_outside_range (odds between the
+  // preferred range and the Long Shots cutoff) was computed server-side
+  // but never rendered anywhere -- a genuine, real value bet (Utah Jazz
+  // @ 2.94, ~2% edge) was sitting in the data invisible to the user the
+  // whole time. Shown collapsed, not mixed into the main list above,
+  // since it's outside the odds range by design -- but it exists now.
+  if (s.value_outside_range.length) {
+    html += expander(
+      `${s.value_outside_range.length} more outside the ${lo}-${hi} range`,
+      s.value_outside_range.map(tipCard).join("")
+    );
+  }
   html += `</section>`;
 
   if (s.has_history) {
