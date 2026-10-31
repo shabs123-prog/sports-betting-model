@@ -633,6 +633,22 @@ def run(sport: str = "nba", log=print) -> dict:
                 _out_player_ppgs(away_injuries, cfg, player_ppg_cache),
             )
             scoring_projection = project_matchup(home_avg_adj, away_avg_adj)
+            # Real bug found 2026-10-31: 9 of 10 NBA totals leans on one
+            # slate came out Under, every one citing injuries, with gaps
+            # (6.5-12.5pts) matching almost exactly what the injury math
+            # alone would subtract. The problem: a market line is itself
+            # set (and moves) with full knowledge of who's out -- if this
+            # adjustment is the ONLY reason a gap clears the bar, the
+            # "edge" is just re-deriving public injury news the book has
+            # already priced in, not a genuine model disagreement.
+            # scoring_projection_raw (no injury subtraction) lets the gate
+            # below require the gap to be real on its own terms too --
+            # injury adjustment can still SUPPRESS a pick (its original,
+            # validated use: Kings missing 4 players, 2026-10-28), it just
+            # can no longer be the sole source of one qualifying.
+            scoring_projection_raw = project_matchup(
+                scoring_averages.get(home_team), scoring_averages.get(away_team)
+            )
 
         h2h_best_prices, h2h_value_outcomes = {}, set()
         spreads_best_prices, totals_best_prices = {}, {}
@@ -835,13 +851,19 @@ def run(sport: str = "nba", log=print) -> dict:
                     continue
                 if outcome_name == home_odds_name:
                     team_margin = scoring_projection["projected_margin"]
+                    team_margin_raw = scoring_projection_raw["projected_margin"] if scoring_projection_raw else None
                 elif outcome_name == away_odds_name:
                     team_margin = -scoring_projection["projected_margin"]
+                    team_margin_raw = -scoring_projection_raw["projected_margin"] if scoring_projection_raw else None
                 else:
                     continue
                 gap = team_margin + point  # how much the model has this side covering by
                 threshold = scoring_projection["projected_total"] * PREDICTION_LEAN_MIN_GAP_PCT
                 if gap < threshold:
+                    continue
+                # See scoring_projection_raw's comment above -- injury
+                # adjustment can suppress, not manufacture, a qualifying gap.
+                if team_margin_raw is None or (team_margin_raw + point) < threshold:
                     continue
                 decimal_odds = price_info["price"]
                 if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
@@ -900,6 +922,14 @@ def run(sport: str = "nba", log=print) -> dict:
                 wants_over = outcome_name.lower() == "over"
                 gap = gap_over if wants_over else -gap_over
                 if gap < threshold:
+                    continue
+                # See scoring_projection_raw's comment above -- injury
+                # adjustment can suppress, not manufacture, a qualifying gap.
+                if scoring_projection_raw is None:
+                    continue
+                gap_over_raw = scoring_projection_raw["projected_total"] - point
+                gap_raw = gap_over_raw if wants_over else -gap_over_raw
+                if gap_raw < threshold:
                     continue
                 decimal_odds = price_info["price"]
                 if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
