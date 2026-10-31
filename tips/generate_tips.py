@@ -279,9 +279,29 @@ PREFERRED_ODDS_RANGE = (1.7, 2.2)
 PREFERRED_MARKETS = {"spreads", "totals"}
 DISCOUNTED_EDGE_MULTIPLIER = 0.6  # accept 60% of the usual min-edge when either applies
 
+# Real issue found 2026-11-01: "is there a reason why everything is 0.75
+# units... only post bets u think have genuine chance of winning." Every
+# longshot value tip (odds > max_single_odds) already gets flat-capped to
+# LONGSHOT_UNIT_CAP regardless of its edge_pct -- that part's intentional
+# (see its own comment: a big edge_pct at a steep price is often a
+# devig/mispricing artifact, not real confidence). But the QUALIFYING bar
+# for one was still the plain base_threshold (0.75% by default) -- so a
+# 23%-implied-probability underdog with a genuinely thin, likely-noisy
+# 0.79% edge (Sacramento Kings @4.4, checked live) qualified exactly as
+# easily as a short favourite would, and sat at the identical 0.75u as a
+# real 12.7% edge (Man United @4.4, same slate) -- no differentiation at
+# the only point that still mattered, which side of this bar. Backtest
+# evidence (this session, deduped/profit-based): real value tips at
+# <30% implied probability went 0-for-11. A premium multiplier here, not
+# a discount -- the opposite direction from PREFERRED_MARKETS/_ODDS_RANGE
+# above, same mechanism.
+LONGSHOT_MIN_EDGE_MULTIPLIER = 4.0  # 0.75% base -> 3% required for a longshot
 
-def _effective_min_edge(decimal_odds: float, market: str, base_threshold: float) -> float:
+
+def _effective_min_edge(decimal_odds: float, market: str, base_threshold: float, max_single_odds: float) -> float:
     lo, hi = PREFERRED_ODDS_RANGE
+    if decimal_odds > max_single_odds:
+        return base_threshold * LONGSHOT_MIN_EDGE_MULTIPLIER
     if market in PREFERRED_MARKETS or lo <= decimal_odds <= hi:
         return base_threshold * DISCOUNTED_EDGE_MULTIPLIER
     return base_threshold
@@ -501,7 +521,7 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
                 })
 
                 devig_edge_pct = edge.edge_pct(fair_prob, decimal_odds)
-                if devig_edge_pct < _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
+                if devig_edge_pct < _effective_min_edge(decimal_odds, market, settings["min_edge_pct"], settings["max_single_odds"]):
                     continue
                 units = _kelly_units(fair_prob, decimal_odds, settings)
                 reasoning = f"{_VALUE_WHY_FALLBACK} {_value_detail(fair_prob, decimal_odds, bookmaker)}"
@@ -731,7 +751,7 @@ def run(sport: str = "nba", log=print) -> dict:
                 # disagreements with the market are almost always model noise,
                 # not real edge. It must NEVER be the thing that triggers a tip
                 # or sizes a stake -- that was a bug in an earlier version.
-                if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"]):
+                if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"], settings["max_single_odds"]):
                     units = _kelly_units(fair_prob, decimal_odds, settings)
                     reasoning_parts = [
                         _plain_why(why_facts, _VALUE_WHY_FALLBACK),
