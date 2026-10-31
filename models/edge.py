@@ -31,6 +31,45 @@ def consensus_fair_probs(bookmaker_books: list[dict]) -> dict:
     return {name: per_outcome_sums[name] / per_outcome_counts[name] for name in per_outcome_sums}
 
 
+# Real case found 2026-11-01: an EPL match where one side was priced
+# ~1.00-1.03 EVERYWHERE (a near-certain favourite -- the other side was
+# clearly a severely weakened lineup, not a normal competitive match) had
+# bookmaker prices for the underdog/draw outcomes ranging wildly --
+# Manchester United quoted anywhere from 41 to 1000+ across books, even
+# between two near-simultaneous listings on the SAME exchange. Averaging
+# that naively (consensus_fair_probs above) still produces A number, but
+# it's really just an artifact of how much the books happen to disagree,
+# not a genuine shared view -- exactly the "mispricing artifact, not real
+# confidence" risk already called out for longshot edge_pct elsewhere in
+# this project, just showing up from the agreement side instead of the
+# probability-level side. A tight market (every book within a small
+# multiple of each other) is a real consensus; a scattered one isn't,
+# regardless of what the average comes out to.
+MAX_RELATIVE_DISPERSION = 2.5  # highest devigged prob / lowest, among books pricing this outcome
+
+
+def fair_prob_is_reliable(bookmaker_books: list[dict], outcome_name: str) -> bool:
+    """
+    False when the books pricing this outcome disagree too much with each
+    other for their average to mean anything -- see MAX_RELATIVE_DISPERSION's
+    comment. True (not blocked) when fewer than 2 books price it at all;
+    can't judge agreement from a single source, and that's a separate,
+    already-handled concern (fewer books just means a thinner consensus,
+    not a provably bad one).
+    """
+    probs = []
+    for book in bookmaker_books:
+        fair = devig_book(book["prices"])
+        if outcome_name in fair:
+            probs.append(fair[outcome_name])
+    if len(probs) < 2:
+        return True
+    lo, hi = min(probs), max(probs)
+    if lo <= 0:
+        return False
+    return (hi / lo) <= MAX_RELATIVE_DISPERSION
+
+
 def ev_pct(prob: float, decimal_odds: float) -> float:
     """Expected value per $1 staked, as a fraction. >0 means positive EV."""
     return prob * decimal_odds - 1.0

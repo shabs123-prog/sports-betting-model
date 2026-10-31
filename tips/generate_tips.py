@@ -55,32 +55,53 @@ def _load_staking_settings() -> dict:
 # A longshot can carry a huge raw edge_pct purely because the model/sharp
 # fair probability diverges a lot from a steep price -- that's a mispricing
 # artifact, not the kind of "I'm confident about this" a Strong tier is
-# meant to signal within the preferred odds range. Kept low regardless of
-# tier for anything priced above max_single_odds, per explicit feedback:
-# "not gonna do high unit bets on high odd picks." Matches the Lean tier
-# default (0.75) -- a longshot shouldn't outsize the lowest-confidence tier.
+# meant to signal within the preferred odds range.
 #
-# This is a CEILING for the same saturating curve _kelly_units always
-# uses, not a flat override -- it used to be a flat min(units,
+# History on this constant, same day: started as a flat min(units,
 # LONGSHOT_UNIT_CAP), which collapsed every longshot that cleared it to
-# the identical number (real case, explicit feedback 2026-11-01: "why is
-# @4.4 odds 0.75 units same as a 19.6 odds bet at 0.75 units"). Once
-# LONGSHOT_MIN_EDGE_MULTIPLIER (below) started requiring a real edge to
-# even qualify, nearly every survivor's normal-curve value already
-# exceeded 0.75, so the flat cap was binding on almost all of them --
-# the fix made the sameness worse, not better.
-#
-# Recomputing through the curve with this as the cap is the right shape,
-# but checked the actual numbers it produces: MIN_UNITS (0.5) to this
-# (0.75) is only a 0.25 span, and _round_to_quarter only has ONE possible
-# step in between -- so despite being "continuous," it can still only
-# ever land on 0.5 or 0.75, barely better than one flat number. Needs a
-# lower floor specifically for longshots (LONGSHOT_MIN_UNITS) to actually
-# have room to differentiate, not a higher ceiling -- raising the ceiling
-# would cut against the explicit, repeated feedback this cap exists for
-# in the first place ("not gonna do high unit bets on high odd picks").
+# the identical number (explicit feedback: "why is @4.4 odds 0.75 units
+# same as a 19.6 odds bet at 0.75 units"). Recomputing through the same
+# saturating curve with this as a flat CEILING was the next attempt, but
+# checked the actual output: MIN_UNITS (0.5) to this (0.75) is only a
+# 0.25 span, and units round to the nearest quarter, so there was only
+# ONE possible step in between -- still basically two flat numbers.
+# Widened the floor down to LONGSHOT_MIN_UNITS to get three real steps,
+# which helped, but follow-up feedback was blunter: "still feel the
+# ceiling is 0.75 units... make units according to bet likelyness to
+# hit." That's the real fix -- a flat ceiling tied only to "is the price
+# above max_single_odds" treats a pick at 2.3 (close to a real chance)
+# identically to one at 33.0 (a true longshot), which isn't what
+# "likelihood to hit" means. See _longshot_cap() below: the ceiling now
+# scales continuously with fair_prob itself between this floor (true
+# longshot territory) and the normal in-range cap (a real, live chance),
+# rather than a single number everything above the range gets squeezed
+# into.
 LONGSHOT_UNIT_CAP = 0.75
 LONGSHOT_MIN_UNITS = 0.25
+
+# Anchor points for _longshot_cap()'s fair_prob -> ceiling scaling. Below
+# LONGSHOT_DEEP_PROB, full discount applies (ceiling = LONGSHOT_UNIT_CAP)
+# -- that's genuine longshot territory, same distrust-the-devig-at-a-
+# steep-price reasoning as LONGSHOT_UNIT_CAP's own comment, and exactly
+# where this session's own backtest found real value tips going 0-for-11.
+# At/above the implied probability of max_single_odds itself, no discount
+# at all (ceiling = the normal cap) -- that's the natural reference point
+# for "not really a longshot anymore," the same line that decides whether
+# a pick is in the preferred range in the first place. Linear in between.
+# Not fitted to data (there isn't enough long-odds history yet to fit
+# this properly) -- a reasoned first pass, re-check once more longshot
+# results accumulate under this scheme.
+LONGSHOT_DEEP_PROB = 0.08
+
+
+def _longshot_cap(fair_prob: float, max_single_odds: float, normal_cap: float) -> float:
+    high_prob = 1.0 / max_single_odds
+    if fair_prob >= high_prob:
+        return normal_cap
+    if fair_prob <= LONGSHOT_DEEP_PROB:
+        return LONGSHOT_UNIT_CAP
+    t = (fair_prob - LONGSHOT_DEEP_PROB) / (high_prob - LONGSHOT_DEEP_PROB)
+    return LONGSHOT_UNIT_CAP + t * (normal_cap - LONGSHOT_UNIT_CAP)
 
 # Explicit feedback (2026-10-27): units don't need to land on round
 # numbers like 1.5/2.5 any more -- size continuously, as long as it
@@ -167,13 +188,12 @@ def _kelly_units(
 ) -> float:
     cap = settings["max_units"] if max_units_override is None else min(settings["max_units"], max_units_override)
     k = CURVE_K if curve_k_override is None else curve_k_override
-    # See LONGSHOT_UNIT_CAP's own comment -- same curve, just a much lower
-    # ceiling AND floor, so there's enough span between them for
-    # _round_to_quarter to actually differentiate longshots by edge
-    # instead of every one landing on one or two flat numbers.
+    # See LONGSHOT_UNIT_CAP's own comment -- a lower floor, and a ceiling
+    # that scales with fair_prob (_longshot_cap) instead of a flat number,
+    # so units actually track how likely the pick is to hit.
     floor = MIN_UNITS
     if decimal_odds > settings["max_single_odds"]:
-        cap = min(cap, LONGSHOT_UNIT_CAP)
+        cap = _longshot_cap(fair_prob, settings["max_single_odds"], cap)
         floor = LONGSHOT_MIN_UNITS
     full_kelly_pct = kelly_fraction(fair_prob, decimal_odds) * 100
     units = floor + (cap - floor) * full_kelly_pct / (full_kelly_pct + k)
@@ -550,6 +570,12 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
                 devig_edge_pct = edge.edge_pct(fair_prob, decimal_odds)
                 if devig_edge_pct < _effective_min_edge(decimal_odds, market, settings["min_edge_pct"], settings["max_single_odds"]):
                     continue
+                # See edge.fair_prob_is_reliable's own comment -- a big
+                # "edge" built on books that wildly disagree with each
+                # other isn't trustworthy just because the average clears
+                # the bar.
+                if not edge.fair_prob_is_reliable(books, outcome_name):
+                    continue
                 units = _kelly_units(fair_prob, decimal_odds, settings)
                 reasoning = f"{_VALUE_WHY_FALLBACK} {_value_detail(fair_prob, decimal_odds, bookmaker)}"
                 db.insert_tip({
@@ -778,7 +804,12 @@ def run(sport: str = "nba", log=print) -> dict:
                 # disagreements with the market are almost always model noise,
                 # not real edge. It must NEVER be the thing that triggers a tip
                 # or sizes a stake -- that was a bug in an earlier version.
-                if devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"], settings["max_single_odds"]):
+                # See edge.fair_prob_is_reliable's own comment -- only
+                # meaningful for the AU-consensus path (an actual average
+                # across books that can disagree); a sharp single-bookmaker
+                # reference isn't an average, so there's nothing to check.
+                edge_is_reliable = fair_prob_source != "AU consensus" or edge.fair_prob_is_reliable(books, outcome_name)
+                if edge_is_reliable and devig_edge_pct >= _effective_min_edge(decimal_odds, market, settings["min_edge_pct"], settings["max_single_odds"]):
                     units = _kelly_units(fair_prob, decimal_odds, settings)
                     reasoning_parts = [
                         _plain_why(why_facts, _VALUE_WHY_FALLBACK),
