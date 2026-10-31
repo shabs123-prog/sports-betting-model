@@ -155,6 +155,28 @@ def build_this_week() -> dict:
     return result
 
 
+def build_longshots() -> list[dict]:
+    """
+    Cross-sport, standalone -- explicit feedback 2026-10-31: "i dont see a
+    long shot tab." It existed as a per-sport section (one per sport's own
+    tab), but that's exactly the "buried" pattern this project has hit
+    before (the old tiny Edit icon) -- easy to miss unless you happen to
+    check a sport that has one right now. A single dedicated tab, same
+    idea as This Week, means there's one place to look regardless of which
+    sport the long shot is in. Also closes a real gap: a longshot value
+    tip outside a sport's own (now narrower) window used to land only in
+    This Week's internal "everything_else" list, which nothing in app.js
+    actually renders -- it was reachable by no UI path at all. Uses the
+    same wide WEEK_AHEAD_DAYS window as This Week so nothing here depends
+    on a sport's own narrower day-after/weekly window.
+    """
+    today = _au_today().isoformat()
+    week_end = (_au_today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
+    value = _with_risk(db.get_tips_in_range(today, week_end, tip_type="value"))
+    longshots = [t for t in value if t["odds_decimal"] >= LONGSHOT_ODDS_THRESHOLD]
+    return sorted(longshots, key=lambda t: t["game_date"])
+
+
 def build_results(sport: str, cfg: dict) -> list[dict]:
     """
     Recent finished games with final scores, for the PWA to auto-grade
@@ -292,6 +314,7 @@ def main():
         "odds_range": [lo, hi],
         "market_label": MARKET_LABEL,
         "this_week": build_this_week(),
+        "longshots": build_longshots(),
         "sports": {sport: build_sport(sport, cfg) for sport, cfg in SPORT_CONFIG.items()},
         "results": {sport: build_results(sport, cfg) for sport, cfg in SPORT_CONFIG.items()},
         "user_bookmakers": sorted(LOG_BET_BOOKMAKERS),

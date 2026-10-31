@@ -237,6 +237,18 @@ function renderThisWeek() {
   return html;
 }
 
+function renderLongshots() {
+  const ls = state.data.longshots || [];
+  let html = `<section>
+    <h2>Long Shots (${ls.length})</h2>
+    <p class="caption">Value bets at @3.00 or higher, across every sport — bigger variance, smaller stakes. Sized conservatively regardless of edge.</p>`;
+  html += ls.length
+    ? ls.map(tipCard).join("")
+    : `<div class="muted-note">No long shots right now — check back once odds move.</div>`;
+  html += `</section>`;
+  return html;
+}
+
 // Fire-and-forget: tells the proxy to kick off the GitHub Action for this
 // sport, then leaves it running -- the workflow itself still takes about
 // a minute to pull odds and push, so this can only confirm "started",
@@ -301,12 +313,6 @@ function renderSport(sport) {
     ? s.value_in_range.map(tipCard).join("")
     : `<div class="muted-note">No value bets in the ${lo}-${hi} odds range for this view right now.</div>`;
   html += `</section>`;
-
-  if (s.longshots.length) {
-    html += `<section><h2>Long Shots (${s.longshots.length})</h2>
-      <p class="caption">Odds @3.00 or higher — bigger variance, smaller stakes.</p>
-      ${s.longshots.map(tipCard).join("")}</section>`;
-  }
 
   if (s.has_history) {
     html += `<section><h2>Predictions</h2><p class="caption">Model leans with no confirmed market edge — lower confidence than a Value Bet.</p>`;
@@ -1005,6 +1011,7 @@ function setupBonusCalc() {
 
 const TAB_RENDERERS = {
   week: renderThisWeek,
+  longshots: renderLongshots,
   mybets: renderMyBets,
   bonus: renderBonusCalc,
   horses: renderHorses,
@@ -1024,7 +1031,7 @@ function renderTab(tab) {
 
 function buildTabBar() {
   const nav = document.getElementById("tabbar");
-  const tabs = [["week", "This Week"], ...SPORT_ORDER.map((s) => [s, s.toUpperCase()]), ["horses", "Horses"], ["bonus", "Bonus Calc"], ["mybets", "My Bets"]];
+  const tabs = [["week", "This Week"], ...SPORT_ORDER.map((s) => [s, s.toUpperCase()]), ["longshots", "Long Shots"], ["horses", "Horses"], ["bonus", "Bonus Calc"], ["mybets", "My Bets"]];
   nav.innerHTML = tabs.map(([id, label]) => `<button data-tab="${id}">${label}</button>`).join("");
   nav.querySelectorAll("button").forEach((btn) => {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
