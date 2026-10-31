@@ -315,6 +315,18 @@ select.form-input {
   text-decoration: underline;
   padding: 4px;
 }
+.clear-results-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  text-decoration: underline;
+  padding: 4px;
+  margin-left: 8px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.clear-results-btn:hover { color: var(--accent); }
 
 .alert {
   background: #1d3324;

@@ -38,5 +38,16 @@ jobs:
           git config user.name "tips-bot"
           git config user.email "actions@users.noreply.github.com"
           git add -f tips.db docs/data.json
-          git diff --staged --quiet || git commit -m "Results refresh $(date -u +'%F %H:%M UTC')"
+          git diff --staged --quiet && exit 0
+          git commit -m "Results refresh $(date -u +'%F %H:%M UTC')"
+          # See daily-refresh.yml's commit step for why this retries --
+          # same risk, same fix: this runs every 3 hours too, and now races
+          # against daily-refresh.yml's own new every-3-hours NBL cron.
+          for i in 1 2 3 4 5; do
+            git push && exit 0
+            echo "push rejected, retrying ($i/5)..."
+            git fetch origin main
+            git rebase origin/main
+            sleep $((i * 5))
+          done
           git push

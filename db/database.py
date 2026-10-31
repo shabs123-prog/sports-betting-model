@@ -43,6 +43,12 @@ def _migrate(conn):
     if "game_time_local" not in cols:
         conn.execute("ALTER TABLE tips ADD COLUMN game_time_local TEXT")
 
+    lh_cols = {row["name"] for row in conn.execute("PRAGMA table_info(line_history)")}
+    if "best_price" not in lh_cols:
+        conn.execute("ALTER TABLE line_history ADD COLUMN best_price REAL")
+    if "best_bookmaker" not in lh_cols:
+        conn.execute("ALTER TABLE line_history ADD COLUMN best_bookmaker TEXT")
+
 
 def insert_tip(tip: dict) -> int:
     with get_conn() as conn:
@@ -293,18 +299,22 @@ def save_elo_ratings(sport: str, ratings: dict):
 
 
 def insert_line_history_batch(rows: list[dict]):
-    """rows: [{sport, matchup, game_date, market, outcome, point, fair_prob, fair_prob_source}, ...]"""
+    """rows: [{sport, matchup, game_date, market, outcome, point, fair_prob,
+    fair_prob_source, best_price, best_bookmaker}, ...] -- the last two are
+    optional (closing-line-value tracking, added 2026-10-31), default NULL."""
     if not rows:
         return
     with get_conn() as conn:
         ts = now_iso()
         conn.executemany(
             """INSERT INTO line_history
-               (recorded_at, sport, matchup, game_date, market, outcome, point, fair_prob, fair_prob_source)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+               (recorded_at, sport, matchup, game_date, market, outcome, point, fair_prob,
+                fair_prob_source, best_price, best_bookmaker)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             [
                 (ts, r["sport"], r["matchup"], r["game_date"], r["market"], r["outcome"],
-                 r.get("point"), r["fair_prob"], r["fair_prob_source"])
+                 r.get("point"), r["fair_prob"], r["fair_prob_source"],
+                 r.get("best_price"), r.get("best_bookmaker"))
                 for r in rows
             ],
         )

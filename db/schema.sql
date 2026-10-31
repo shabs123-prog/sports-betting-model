@@ -65,7 +65,14 @@ CREATE TABLE IF NOT EXISTS line_history (
     outcome TEXT NOT NULL,
     point REAL,
     fair_prob REAL NOT NULL,
-    fair_prob_source TEXT NOT NULL
+    fair_prob_source TEXT NOT NULL,
+    -- Added 2026-10-31 for closing-line-value tracking ("are we beating
+    -- the closing line by ~6%+ on ~55%+ of bets") -- fair_prob/point alone
+    -- can't answer that, CLV is about the actual PRICE you could get vs
+    -- the price right before the game, at the bookmakers you actually
+    -- hold. NULL on rows recorded before this column existed.
+    best_price REAL,
+    best_bookmaker TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_line_history_line
     ON line_history (sport, matchup, game_date, market, outcome);

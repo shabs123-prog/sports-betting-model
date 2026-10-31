@@ -497,6 +497,7 @@ def _process_extra_event_markets(sport: str, cfg: dict, settings: dict, log) -> 
                     "sport": sport, "matchup": matchup, "game_date": game_date,
                     "market": market, "outcome": outcome_name, "point": point,
                     "fair_prob": fair_prob, "fair_prob_source": "AU consensus",
+                    "best_price": decimal_odds, "best_bookmaker": bookmaker,
                 })
 
                 devig_edge_pct = edge.edge_pct(fair_prob, decimal_odds)
@@ -714,6 +715,7 @@ def run(sport: str = "nba", log=print) -> dict:
                     "sport": sport, "matchup": matchup, "game_date": game_date,
                     "market": market, "outcome": outcome_name, "point": point,
                     "fair_prob": fair_prob, "fair_prob_source": fair_prob_source,
+                    "best_price": decimal_odds, "best_bookmaker": bookmaker,
                 })
 
                 devig_edge_pct = edge.edge_pct(fair_prob, decimal_odds)

@@ -529,6 +529,15 @@ function deleteBet(id) {
   saveBets(loadBets().filter((b) => b.id !== id));
 }
 
+// Explicit request 2026-10-31: "tmr is a fresh day, delete the my bets
+// results and we are starting again." Settled bets only -- a pending bet
+// is still an open position the user cares about the outcome of, wiping
+// it would be destructive in a different, unwanted way. Irreversible
+// (localStorage, no undo), hence the confirm.
+function clearSettledBets() {
+  saveBets(loadBets().filter((b) => b.result === "pending"));
+}
+
 // ---- Auto-grading: match a pending bet against free ESPN results
 // (state.data.results, built server-side in pwa/build_site.py -- no API
 // quota involved) and settle it automatically. Only grades when the
@@ -907,7 +916,7 @@ function renderMyBets() {
     html += `<section><h2>Pending (${pending.length})</h2>${pending.map(betCard).join("")}</section>`;
   }
   if (settled.length) {
-    html += `<section><h2>Results (${settled.length})</h2>${renderResultsByDate(settled)}</section>`;
+    html += `<section><h2>Results (${settled.length}) <button class="clear-results-btn" data-clear-results="1">Clear results</button></h2>${renderResultsByDate(settled)}</section>`;
   }
   return html;
 }
@@ -1189,6 +1198,14 @@ function init() {
     if (delBtn) {
       deleteBet(delBtn.dataset.deleteBet);
       renderTab(activeTab);
+      return;
+    }
+    const clearResultsBtn = e.target.closest("[data-clear-results]");
+    if (clearResultsBtn) {
+      if (confirm("Clear all settled bet results? This can't be undone. Pending bets are kept.")) {
+        clearSettledBets();
+        renderTab(activeTab);
+      }
       return;
     }
     const refreshSportBtn = e.target.closest("[data-refresh-sport]");

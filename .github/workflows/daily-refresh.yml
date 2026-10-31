@@ -31,6 +31,15 @@ on:
     # evening before). Adds only ~6 credits/day (1 sport's bulk pull) --
     # affordable with 4 keys/2000 a month now.
     - cron: "0 9 * * *"   # ~8pm AEDT / 7pm AEST
+    # NBL-only, every 3 hours -- explicit feedback 2026-10-31: NBL's value
+    # specifically comes from catching a line BEFORE it drifts ("get it as
+    # early as possible... the line changes closer to game day and you're
+    # to predict that"), the opposite timing emphasis from NBA (where
+    # injuries confirmed close to game time matter more, hence NBA staying
+    # on the night-before-only cron above). Offset 10 past the hour so it
+    # doesn't land on results-refresh.yml's own :00 three-hourly schedule
+    # and race it on the same tips.db/data.json push.
+    - cron: "10 */3 * * *"
   workflow_dispatch:
     inputs:
       sport:
@@ -61,12 +70,12 @@ jobs:
       - run: pip install -r requirements.txt
 
       # Which sport(s) to refresh, in priority order: a manual "sport" input
-      # wins if present; otherwise the 8pm cron (github.event.schedule
-      # equals its own cron string) means NBA only; otherwise (the 9am
-      # cron, or anything else) means "all", same as the original
-      # single-schedule behaviour.
+      # wins if present; otherwise match the firing cron's own string (8pm
+      # = NBA only, every-3-hours = NBL only); otherwise (the 9am cron, or
+      # anything else) means "all", same as the original single-schedule
+      # behaviour.
       - name: Refresh sport(s)
-        run: python -m scripts.run_auto_refresh "${{ github.event.inputs.sport || (github.event.schedule == '0 9 * * *' && 'nba' || 'all') }}"
+        run: python -m scripts.run_auto_refresh "${{ github.event.inputs.sport || (github.event.schedule == '0 9 * * *' && 'nba') || (github.event.schedule == '10 */3 * * *' && 'nbl') || 'all' }}"
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           # Optional additional free-tier keys -- data/odds_api.py falls
@@ -84,5 +93,21 @@ jobs:
           git config user.name "tips-bot"
           git config user.email "actions@users.noreply.github.com"
           git add -f tips.db docs/data.json
-          git diff --staged --quiet || git commit -m "Daily tips refresh $(date -u +%F)"
+          git diff --staged --quiet && exit 0
+          git commit -m "Daily tips refresh $(date -u +%F)"
+          # Real risk added 2026-10-31: this workflow now fires every 3
+          # hours for NBL on top of its existing two daily runs, and
+          # results-refresh.yml fires every 3 hours too -- two scheduled
+          # jobs racing to push the same branch is now a real, not
+          # theoretical, possibility, and a bare `git push` has no retry,
+          # so the loser's run would just fail outright and silently drop
+          # that refresh. Retry a few times: fetch + rebase onto whatever
+          # landed first, then push again.
+          for i in 1 2 3 4 5; do
+            git push && exit 0
+            echo "push rejected, retrying ($i/5)..."
+            git fetch origin main
+            git rebase origin/main
+            sleep $((i * 5))
+          done
           git push
