@@ -55,11 +55,32 @@ def _load_staking_settings() -> dict:
 # A longshot can carry a huge raw edge_pct purely because the model/sharp
 # fair probability diverges a lot from a steep price -- that's a mispricing
 # artifact, not the kind of "I'm confident about this" a Strong tier is
-# meant to signal within the preferred odds range. Capped flat regardless
-# of tier for anything priced above max_single_odds, per explicit feedback:
+# meant to signal within the preferred odds range. Kept low regardless of
+# tier for anything priced above max_single_odds, per explicit feedback:
 # "not gonna do high unit bets on high odd picks." Matches the Lean tier
 # default (0.75) -- a longshot shouldn't outsize the lowest-confidence tier.
+#
+# This is a CEILING for the same saturating curve _kelly_units always
+# uses, not a flat override -- it used to be a flat min(units,
+# LONGSHOT_UNIT_CAP), which collapsed every longshot that cleared it to
+# the identical number (real case, explicit feedback 2026-11-01: "why is
+# @4.4 odds 0.75 units same as a 19.6 odds bet at 0.75 units"). Once
+# LONGSHOT_MIN_EDGE_MULTIPLIER (below) started requiring a real edge to
+# even qualify, nearly every survivor's normal-curve value already
+# exceeded 0.75, so the flat cap was binding on almost all of them --
+# the fix made the sameness worse, not better.
+#
+# Recomputing through the curve with this as the cap is the right shape,
+# but checked the actual numbers it produces: MIN_UNITS (0.5) to this
+# (0.75) is only a 0.25 span, and _round_to_quarter only has ONE possible
+# step in between -- so despite being "continuous," it can still only
+# ever land on 0.5 or 0.75, barely better than one flat number. Needs a
+# lower floor specifically for longshots (LONGSHOT_MIN_UNITS) to actually
+# have room to differentiate, not a higher ceiling -- raising the ceiling
+# would cut against the explicit, repeated feedback this cap exists for
+# in the first place ("not gonna do high unit bets on high odd picks").
 LONGSHOT_UNIT_CAP = 0.75
+LONGSHOT_MIN_UNITS = 0.25
 
 # Explicit feedback (2026-10-27): units don't need to land on round
 # numbers like 1.5/2.5 any more -- size continuously, as long as it
@@ -146,11 +167,17 @@ def _kelly_units(
 ) -> float:
     cap = settings["max_units"] if max_units_override is None else min(settings["max_units"], max_units_override)
     k = CURVE_K if curve_k_override is None else curve_k_override
-    full_kelly_pct = kelly_fraction(fair_prob, decimal_odds) * 100
-    units = MIN_UNITS + (cap - MIN_UNITS) * full_kelly_pct / (full_kelly_pct + k)
+    # See LONGSHOT_UNIT_CAP's own comment -- same curve, just a much lower
+    # ceiling AND floor, so there's enough span between them for
+    # _round_to_quarter to actually differentiate longshots by edge
+    # instead of every one landing on one or two flat numbers.
+    floor = MIN_UNITS
     if decimal_odds > settings["max_single_odds"]:
-        units = min(units, LONGSHOT_UNIT_CAP)
-    return _round_to_quarter(max(MIN_UNITS, units))
+        cap = min(cap, LONGSHOT_UNIT_CAP)
+        floor = LONGSHOT_MIN_UNITS
+    full_kelly_pct = kelly_fraction(fair_prob, decimal_odds) * 100
+    units = floor + (cap - floor) * full_kelly_pct / (full_kelly_pct + k)
+    return _round_to_quarter(max(floor, units))
 
 
 # Model Elo is draw-aware for exactly zero of the sports configured so far --
@@ -224,16 +251,16 @@ SCORING_LEAN_MAX_UNITS = 2.0
 SCORING_LEAN_RATIO_CEILING = 3.0  # ratio at/above which it maxes out
 
 
-def _scoring_lean_units(gap: float, threshold: float) -> float:
+def _scoring_lean_units(gap: float, threshold: float, max_units: float = SCORING_LEAN_MAX_UNITS) -> float:
     if threshold <= 0:
         return MIN_UNITS
     ratio = gap / threshold
     if ratio <= 1.0:
         return MIN_UNITS
     if ratio >= SCORING_LEAN_RATIO_CEILING:
-        return SCORING_LEAN_MAX_UNITS
+        return max_units
     span = SCORING_LEAN_RATIO_CEILING - 1.0
-    units = MIN_UNITS + (ratio - 1.0) / span * (SCORING_LEAN_MAX_UNITS - MIN_UNITS)
+    units = MIN_UNITS + (ratio - 1.0) / span * (max_units - MIN_UNITS)
     return _round_to_quarter(units)
 
 
@@ -891,9 +918,11 @@ def run(sport: str = "nba", log=print) -> dict:
                 if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
                     continue
                 sizing_threshold = scoring_projection["projected_total"] * SCORING_LEAN_SIZING_REF_PCT
+                # No LONGSHOT_UNIT_CAP branch here -- the range check just
+                # above already restricts this block to decimal_odds <=
+                # max_single_odds, so a spreads Prediction can never be a
+                # longshot in the first place (unlike h2h/totals value tips).
                 pred_units = _scoring_lean_units(gap, sizing_threshold)
-                if decimal_odds > settings["max_single_odds"]:
-                    pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "spreads")
                 momentum_fact = _line_momentum_fact(
                     sport, matchup, game_date, "spreads", outcome_name,
@@ -957,9 +986,9 @@ def run(sport: str = "nba", log=print) -> dict:
                 if not (settings["min_single_odds"] <= decimal_odds <= settings["max_single_odds"]):
                     continue
                 sizing_threshold = scoring_projection["projected_total"] * SCORING_LEAN_SIZING_REF_PCT
+                # Same as the spreads block above -- the range check just
+                # above already rules out a longshot totals Prediction.
                 pred_units = _scoring_lean_units(gap, sizing_threshold)
-                if decimal_odds > settings["max_single_odds"]:
-                    pred_units = min(pred_units, LONGSHOT_UNIT_CAP)
                 selection = _format_selection(outcome_name, point, "totals")
                 projected_total = scoring_projection["projected_total"]
                 momentum_fact = _line_momentum_fact(

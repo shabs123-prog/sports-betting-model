@@ -31,15 +31,22 @@ on:
     # evening before). Adds only ~6 credits/day (1 sport's bulk pull) --
     # affordable with 4 keys/2000 a month now.
     - cron: "0 9 * * *"   # ~8pm AEDT / 7pm AEST
-    # NBL-only, every 3 hours -- explicit feedback 2026-10-31: NBL's value
+    # NBL-only, twice a day -- explicit feedback 2026-10-31: NBL's value
     # specifically comes from catching a line BEFORE it drifts ("get it as
     # early as possible... the line changes closer to game day and you're
     # to predict that"), the opposite timing emphasis from NBA (where
     # injuries confirmed close to game time matter more, hence NBA staying
-    # on the night-before-only cron above). Offset 10 past the hour so it
-    # doesn't land on results-refresh.yml's own :00 three-hourly schedule
-    # and race it on the same tips.db/data.json push.
-    - cron: "10 */3 * * *"
+    # on the night-before-only cron above). Started at every 3 hours
+    # (2026-10-31), walked back same day on explicit follow-up ("might be
+    # too much") -- NBL is a genuinely low-volume league (1-3 games with
+    # odds posted at a time, confirmed live against SportsBet directly),
+    # so it doesn't need checking more often than NBA's own 2-touches/day
+    # pattern, just offset to actually land midday rather than only
+    # morning+evening like NBA's. ~11am and ~7pm AEDT. Offset 10 past the
+    # hour so neither lands on results-refresh.yml's own :00 three-hourly
+    # schedule and races it on the same tips.db/data.json push.
+    - cron: "10 0 * * *"   # ~11am AEDT / 10am AEST
+    - cron: "10 8 * * *"   # ~7pm AEDT / 6pm AEST
   workflow_dispatch:
     inputs:
       sport:
@@ -71,11 +78,11 @@ jobs:
 
       # Which sport(s) to refresh, in priority order: a manual "sport" input
       # wins if present; otherwise match the firing cron's own string (8pm
-      # = NBA only, every-3-hours = NBL only); otherwise (the 9am cron, or
-      # anything else) means "all", same as the original single-schedule
-      # behaviour.
+      # = NBA only, either of the two NBL-only times); otherwise (the 9am
+      # cron, or anything else) means "all", same as the original
+      # single-schedule behaviour.
       - name: Refresh sport(s)
-        run: python -m scripts.run_auto_refresh "${{ github.event.inputs.sport || (github.event.schedule == '0 9 * * *' && 'nba') || (github.event.schedule == '10 */3 * * *' && 'nbl') || 'all' }}"
+        run: python -m scripts.run_auto_refresh "${{ github.event.inputs.sport || (github.event.schedule == '0 9 * * *' && 'nba') || (github.event.schedule == '10 0 * * *' && 'nbl') || (github.event.schedule == '10 8 * * *' && 'nbl') || 'all' }}"
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           # Optional additional free-tier keys -- data/odds_api.py falls
