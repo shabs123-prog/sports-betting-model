@@ -74,7 +74,14 @@ DEFAULT_MAX_SINGLE_ODDS = float(_get_secret("MAX_SINGLE_ODDS", "2.2"))
 # sits inside this window, not just once, so moving 3->5 roughly doubles
 # BTTS's daily cost (~4-5 events/day -> ~8-9) -- affordable now, wasn't
 # at 1000/month.
-EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS = 5
+#
+# Raised 5->7 on 2026-11-01 (explicit feedback: "epl is good make sure
+# to include the over under 2.5 goals") -- checked live and EPL fixtures
+# tend to post in full-gameweek batches a week or more apart, so a
+# 5-day window was routinely only catching 2 of that week's games, with
+# the next 6-game batch sitting 6-7 days out. A 4th key landed since the
+# last bump too (2000/month total), so there's room for this.
+EXTRA_EVENT_MARKETS_LOOKAHEAD_DAYS = 7
 
 # Odds API regions -- 'au' is the AU-licensed bookmakers you can actually bet
 # at. 'eu' is added to also pull Pinnacle -- a sharp, low-margin reference
