@@ -1088,7 +1088,19 @@ def run(sport: str = "nba", log=print) -> dict:
                     "selection": home_odds_name,
                     "bookmaker": ref_price["bookmaker"],
                     "odds_decimal": ref_price["price"],
-                    "suggested_units": LONGSHOT_UNIT_CAP,
+                    # Real bug found 2026-11-01, right after widening which
+                    # games get a card at all (see below): this used to be
+                    # LONGSHOT_UNIT_CAP, a real-looking "0.75" next to text
+                    # that says "no pick here" -- once games without any
+                    # pick started actually showing up, EVERY one of them
+                    # displayed that same flat 0.75 like a genuine stake
+                    # suggestion, which is exactly the "why is everything
+                    # 0.75 units" complaint, just from a different source
+                    # than the one already fixed. None here (app.js hides
+                    # the Units badge entirely when it's falsy) -- a
+                    # reference price isn't a recommendation and shouldn't
+                    # carry a number that looks like one.
+                    "suggested_units": None,
                 }
                 reference_price_used = True
 

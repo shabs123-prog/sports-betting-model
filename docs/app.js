@@ -127,10 +127,21 @@ function pickLineAndMeta(t) {
     ? `<span class="${tierClass(tier)}">${combinedRating(tier, t.risk)}</span>` +
       (t.edge_pct !== null && t.edge_pct !== undefined ? ` · ${fmtPct(t.edge_pct)}` : "")
     : (t.model_prob !== null && t.model_prob !== undefined ? `Model confidence: <b>${(t.model_prob * 100).toFixed(1)}%</b>` : "");
+  // Real bug found 2026-11-01: a reference-price-only card (no real pick,
+  // just "here's the current price for context") used to carry a flat
+  // suggested_units anyway, so it rendered an identical "Units: 0.75"
+  // badge to a genuine recommendation -- which is exactly why every game
+  // with no actual pick LOOKED like a uniform pile of 0.75u bets. The
+  // backend now sends null for these; skip the whole units block rather
+  // than show a number that isn't a real suggestion.
+  const hasUnits = t.suggested_units !== null && t.suggested_units !== undefined;
+  const unitsBlock = hasUnits
+    ? `<div><div class="units">${fmtUnits(t.suggested_units)}</div><div class="units-label">Units</div></div>`
+    : "";
   return `
       <div class="pick-line"><b>${escapeHtml(marketLabel(t.market))}</b> · ${escapeHtml(t.selection)} @ <b>${fmtOdds(t.odds_decimal)}</b> · ${escapeHtml(t.bookmaker)}</div>
       <div class="meta-row">
-        <div><div class="units">${fmtUnits(t.suggested_units)}</div><div class="units-label">Units</div></div>
+        ${unitsBlock}
         <div class="risk-edge">${riskEdge}</div>
       </div>`;
 }
