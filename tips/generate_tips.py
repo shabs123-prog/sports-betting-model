@@ -1092,12 +1092,26 @@ def run(sport: str = "nba", log=print) -> dict:
                 }
                 reference_price_used = True
 
-        if notes:
+        # Real bug found 2026-11-01: this used to be `if notes:` alone --
+        # Arsenal @ Liverpool (36 bookmakers, clearly a real, heavily-priced
+        # fixture) had zero rows of any kind, because neither team had an
+        # injury/rest-situation note AND nothing cleared a value bar, so it
+        # fell through silently. The reference_price fallback just above
+        # exists precisely to stop that ("the card isn't left with no odds/
+        # unit/app just because nothing cleared the bar"), but was trapped
+        # inside the same `if notes:` as the notes themselves -- a genuinely
+        # "boring" (no news) marquee game got LESS visibility than a minor
+        # one with an injury blurb, backwards from what matters. `linked_bet`
+        # covers both cases now: a real value/prediction pick, or the
+        # reference-price fallback.
+        if notes or linked_bet:
             knowledge_notes = list(notes)
             if reference_price_used:
                 knowledge_notes.append(
                     "No pick here -- just showing the current best price for context."
                 )
+            elif not knowledge_notes:
+                knowledge_notes.append("No situational notes for this game -- showing the linked pick for context.")
             db.insert_tip({
                 "game_date": game_date,
                 "game_time_local": game_time_local,
