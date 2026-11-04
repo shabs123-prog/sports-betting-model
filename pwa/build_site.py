@@ -155,6 +155,83 @@ def build_this_week() -> dict:
     return result
 
 
+# How far back the auto-log backfill reaches. Explicit case that prompted
+# this: "if i dont write a msg for a few days the app doesnt even add
+# anything... i want u to just automaitcally put it in my betgs." My Bets
+# only exists in the browser's own localStorage, written when the page is
+# open -- if the user doesn't open the app for a few days, a tip whose
+# game already started and got superseded in that gap would otherwise
+# never reach their bet history at all. 5 days covers a realistic "forgot
+# to check for a few days" gap without dragging in ancient history once
+# this feed's been running a while.
+AUTO_LOG_LOOKBACK_DAYS = 5
+
+
+# A dedupe survivor only counts as "still recommended" if it was part of
+# the LAST time this game was evaluated at all (any market, any
+# tip_type) -- otherwise a later pass that silently dropped it (rather
+# than replacing it with something else in the same market) would still
+# look current. One real pipeline pass over a game writes all its rows
+# (every market x tip_type) within well under a minute -- checked live,
+# an initial cutoff of 10 minutes was too loose and let a real case
+# through (two separate runs 8.5 minutes apart on 2026-10-31 looked like
+# "the same pass" at that threshold). 2 minutes is still a generous
+# multiple of how long one real pass actually takes, with room for a
+# slow run, while clearly separating genuinely distinct pipeline runs.
+AUTO_LOG_STALE_GAP_MINUTES = 2
+
+
+def build_recent_recommendations() -> list[dict]:
+    """
+    Feed for the client's auto-log feature -- every distinct value/
+    prediction tip (deduped to its latest version) with a real
+    suggested_units, for any game from AUTO_LOG_LOOKBACK_DAYS ago through
+    the normal forward-looking window, REGARDLESS of current status. See
+    db.get_recommendable_tips_since's own comment for why status can't be
+    restricted to 'open' here the way every other view in this file does.
+    """
+    start = (_au_today() - timedelta(days=AUTO_LOG_LOOKBACK_DAYS)).isoformat()
+    end = (_au_today() + timedelta(days=WEEK_AHEAD_DAYS)).isoformat()
+    rows = db.get_recommendable_tips_since(start, end)
+    # Real bug caught before shipping: keying on `selection` too (as every
+    # other dedup in this file does) doesn't work here, because selection
+    # bakes in the point ("Under 237.5") -- a totals/spreads line that
+    # drifts across reruns of the SAME game/market during the day produced
+    # a "different" key each time, so one evolving recommendation
+    # auto-logged as 3-4 separate bets. Keyed on market only (no
+    # selection): keeps exactly one entry per (game, market) -- its latest
+    # version, whichever side/line that currently is -- same as how a
+    # human re-checking the board would only act on the current number,
+    # not every number it passed through that day.
+    dedup: dict[tuple, dict] = {}
+    for t in rows:
+        key = (t["sport"], t["matchup"], t["game_date"], t["market"])
+        dedup[key] = t  # rows are created_at ASC, so the last write per key wins
+
+    # Second real bug caught before shipping, same session: a devig-
+    # reliability rejection (models/edge.fair_prob_is_reliable) correctly
+    # stopped reproducing a bad Manchester United/Chelsea "value" pick on
+    # every later run, but with nothing newer in that exact (game, market)
+    # to replace it, the dedupe above still kept the old bad row as
+    # "latest" -- it WAS the latest for its own market, just not for the
+    # game overall. Cross-checking against the game's own last-activity
+    # timestamp catches this: if a knowledge note or another market's row
+    # for the same game exists meaningfully later, a newer pass happened
+    # and chose not to repeat this pick, so it's stale, not current.
+    last_activity = db.get_last_tip_activity(start, end)
+    result = []
+    for t in dedup.values():
+        game_key = (t["sport"], t["matchup"], t["game_date"])
+        last_at = last_activity.get(game_key)
+        if last_at:
+            created = datetime.fromisoformat(t["created_at"])
+            last = datetime.fromisoformat(last_at)
+            if (last - created) > timedelta(minutes=AUTO_LOG_STALE_GAP_MINUTES):
+                continue
+        result.append(t)
+    return sorted(result, key=lambda t: t["game_date"])
+
+
 def build_longshots() -> list[dict]:
     """
     Cross-sport, standalone -- explicit feedback 2026-10-31: "i dont see a
@@ -315,6 +392,7 @@ def main():
         "market_label": MARKET_LABEL,
         "this_week": build_this_week(),
         "longshots": build_longshots(),
+        "recent_recommendations": build_recent_recommendations(),
         "sports": {sport: build_sport(sport, cfg) for sport, cfg in SPORT_CONFIG.items()},
         "results": {sport: build_results(sport, cfg) for sport, cfg in SPORT_CONFIG.items()},
         "user_bookmakers": sorted(LOG_BET_BOOKMAKERS),

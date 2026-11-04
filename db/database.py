@@ -152,6 +152,53 @@ def get_tips_for_date(game_date: str, tip_type: str | None = None):
         return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
+def get_recommendable_tips_since(start_date: str, end_date: str):
+    """
+    For the client's auto-log feed (explicit request 2026-11-04: "all the
+    bets that u place I want u to just automaitcally put it in my betgs").
+    Unlike get_tips_in_range, NOT restricted to status='open' -- a tip
+    whose game already started (and got superseded) between the user's
+    visits still needs to reach this feed, or it silently never gets
+    logged at all.
+
+    Deliberately returns EVERY row in range regardless of status, not
+    just the ones that look safe -- see build_recent_recommendations's
+    own comment for why filtering "superseded" out here (by date, or any
+    simple rule) doesn't actually work, and what it takes to do this
+    correctly. Restricted to tip_type in (value, prediction) with a real
+    suggested_units -- a knowledge-only reference-price card
+    (suggested_units NULL, see tips/generate_tips.py's reference_price_used)
+    was never a recommendation and has nothing to log. created_at ASC so
+    the caller can dedupe by (sport, matchup, game_date, market) and keep
+    the LAST row per distinct pick."""
+    query = """SELECT * FROM tips
+               WHERE tip_type IN ('value', 'prediction') AND suggested_units IS NOT NULL
+               AND game_date >= ? AND game_date <= ?
+               ORDER BY created_at ASC"""
+    with get_conn() as conn:
+        return [dict(row) for row in conn.execute(query, (start_date, end_date)).fetchall()]
+
+
+def get_last_tip_activity(start_date: str, end_date: str) -> dict[tuple, str]:
+    """
+    {(sport, matchup, game_date): latest created_at across ANY tip_type}
+    for games in range -- the "when was this game last evaluated by any
+    pipeline run at all" signal build_recent_recommendations needs to
+    tell apart the two different reasons a row can be status='superseded'
+    (see its comment): a game that already started (no later run, since
+    the pipeline skips started games -- this IS the latest activity) vs a
+    pick a later run re-evaluated and silently dropped (a knowledge note
+    or a different market's row for the SAME game exists with a
+    meaningfully later created_at, proving a new pass happened and chose
+    not to repeat this one)."""
+    query = """SELECT sport, matchup, game_date, MAX(created_at) AS last_at
+               FROM tips WHERE game_date >= ? AND game_date <= ?
+               GROUP BY sport, matchup, game_date"""
+    with get_conn() as conn:
+        rows = conn.execute(query, (start_date, end_date)).fetchall()
+    return {(r["sport"], r["matchup"], r["game_date"]): r["last_at"] for r in rows}
+
+
 def get_tips_in_range(start_date: str, end_date: str, tip_type: str | None = None, sport: str | None = None):
     """Inclusive date range, e.g. for a 'this week' view spanning several game dates.
     status='open' only -- see supersede_open_tips: every pipeline run supersedes

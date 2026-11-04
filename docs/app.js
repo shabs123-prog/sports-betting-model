@@ -425,6 +425,32 @@ function findPendingBetForTip(t) {
   return loadBets().find((b) => b.key === key && b.result === "pending");
 }
 
+// Explicit request 2026-11-04: "if i dont write a msg for a few days the
+// app doesnt even add anything... all the bets that u place i want u to
+// just automaitcally put it in my betgs so i can see the results." My
+// Bets only exists in this browser's localStorage, written when the page
+// is actually open -- so "automatic" has to mean "backfilled the moment
+// you next open the app," not something that can happen while you're
+// away. state.data.recent_recommendations (pwa/build_site.py) carries
+// every real recommendation from the last few days specifically so nothing
+// gets missed just because its game already started before you checked
+// back in. Runs every load; the key-based dedup (same one the manual
+// "+ Log bet" button already uses) makes re-running it harmless.
+function autoLogRecommendedBets() {
+  const recs = (state.data && state.data.recent_recommendations) || [];
+  if (!recs.length) return;
+  const existingKeys = new Set(loadBets().map((b) => b.key));
+  let added = 0;
+  for (const t of recs) {
+    const key = tipKey(t);
+    if (existingKeys.has(key)) continue;
+    logBetFromTip(t, { auto_logged: true });
+    existingKeys.add(key);
+    added++;
+  }
+  return added;
+}
+
 // base64 round-trip (not raw JSON) so the encoded tip can sit safely inside
 // an HTML attribute without fighting quote-escaping.
 function encodeTip(t) {
@@ -466,6 +492,7 @@ function logBetFromTip(t, overrides) {
     // that edge_pct, not something that should drift with later code
     // changes to tier thresholds.
     tier: tierLabel(t.edge_pct),
+    auto_logged: !!o.auto_logged,
   });
   saveBets(bets);
 }
@@ -726,7 +753,7 @@ function betCard(b) {
   return `
     <div class="card">
       <button class="delete-bet" data-delete-bet="${b.id}" aria-label="Delete">×</button>
-      <div class="matchup">${escapeHtml(b.sport.toUpperCase())}: ${escapeHtml(b.matchup)}</div>
+      <div class="matchup">${escapeHtml(b.sport.toUpperCase())}: ${escapeHtml(b.matchup)}${b.auto_logged ? ` <span class="auto-logged-tag">auto-logged</span>` : ""}</div>
       ${b.game_date ? `<div class="date">${escapeHtml(fmtWhen(b))}</div>` : ""}
       <div class="pick-line"><b>${escapeHtml(marketLabel(b.market))}</b> · ${escapeHtml(b.selection)} @ <b>${fmtOdds(b.odds_decimal)}</b> · ${escapeHtml(b.bookmaker)} · <input type="number" class="bet-units-input" data-bet-units="${b.id}" value="${b.units}" step="0.25" min="0.25">u</div>
       ${b.notes ? `<div class="reasoning">"${escapeHtml(b.notes)}"</div>` : ""}
@@ -1085,6 +1112,7 @@ async function loadData({ silent } = {}) {
     const changed = !state.data || state.data.generated_at !== fresh.generated_at;
     state.data = fresh;
     document.getElementById("generated-at").textContent = "Updated " + new Date(fresh.generated_at).toLocaleString();
+    if (changed) autoLogRecommendedBets();
     if (!silent || changed) {
       renderTab(activeTab);
     }

@@ -18,7 +18,8 @@ passes nothing (defaults to "all"), its workflow_dispatch "sport" input
 passes a specific key when run manually from the Actions tab.
 """
 import sys
-from datetime import date
+import traceback
+from datetime import date, datetime, timezone
 
 from config import SPORT_CONFIG
 from db import database as db
@@ -41,6 +42,7 @@ if __name__ == "__main__":
         try:
             run(sport=sport)
             db.set_setting(f"last_run_date_{sport}", date.today().isoformat())
+            db.set_setting(f"last_error_{sport}", "")
         except Exception as e:
             # Most likely cause: API quota exhausted for the period. One
             # sport failing (or the quota running out partway through this
@@ -49,3 +51,15 @@ if __name__ == "__main__":
             # Action step failed and the commit step after it never ran at
             # all, even for sports that succeeded before the failure.
             print(f"[{sport}] refresh failed, leaving its existing tips as-is: {e}")
+            # Real bug found 2026-11-04: last_run_date stuck on every sport
+            # for 3 full days straight despite dozens of "Daily tips
+            # refresh" commits landing on schedule -- something's throwing
+            # on every single automated run, but the Action's own log isn't
+            # something this session can read without separate GitHub
+            # credentials. Persisting the full traceback into tips.db
+            # itself means it rides along on the commit this script's
+            # caller already makes, and is readable locally (or by Claude
+            # in a later session) with a plain sqlite query -- no log
+            # access needed.
+            db.set_setting(f"last_error_{sport}", traceback.format_exc())
+            db.set_setting(f"last_error_at_{sport}", datetime.now(timezone.utc).isoformat())

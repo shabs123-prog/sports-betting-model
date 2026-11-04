@@ -120,6 +120,15 @@ select.form-input {
   font-weight: 600;
   font-size: 0.95rem;
 }
+.auto-logged-tag {
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  border: 1px solid var(--text-dim);
+  border-radius: 4px;
+  padding: 1px 5px;
+  vertical-align: middle;
+}
 .card .date { color: var(--text-dim); font-size: 0.82rem; }
 
 .card .pick-line {
